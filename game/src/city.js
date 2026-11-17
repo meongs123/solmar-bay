@@ -474,3 +474,40 @@ export function skyColors(nightF) {
     return a.lerp(b, nightF).getHex();
   });
 }
+
+// A point on the raised sidewalk slab beside a road, with a heading that
+// walks along that road. The slab runs from 7 m off one road's centreline
+// to 7 m off the next, so an offset of ROAD_HALF + 1.5..6 lands on it.
+// `near` + `radius` bias the spot toward a place (the player spawn), so the
+// streets around the player feel busy instead of uniformly empty.
+export function sidewalkSpot(rng, roadCoords, near = null, radius = 170) {
+  let x = 0, z = 0, heading = 0;
+  for (let tries = 0; tries < 6; tries++) {
+    const rc = rng.pick(roadCoords);
+    const along = rng.range(-CITY_EDGE + 20, CITY_EDGE - 20);
+    const side = rng.chance(0.5) ? 1 : -1;
+    const off = ROAD_HALF + rng.range(1.5, 6);
+    if (rng.chance(0.5)) {
+      // Road runs along x (constant z): walk east or west.
+      x = along; z = rc + side * off;
+      heading = rng.pick([Math.PI / 2, -Math.PI / 2]);
+    } else {
+      // Road runs along z (constant x): walk north or south.
+      x = rc + side * off; z = along;
+      heading = rng.pick([0, Math.PI]);
+    }
+    if (!near) break;
+    if (Math.hypot(x - near.x, z - near.z) <= radius) break;
+  }
+  if (near) {
+    // All six tries missed the radius: pull the spot back to the radius
+    // edge toward `near`, so groups really do gather near the safehouse
+    // instead of silently spawning across the city.
+    const d = Math.hypot(x - near.x, z - near.z);
+    if (d > radius && d > 1e-6) {
+      x = near.x + ((x - near.x) / d) * radius;
+      z = near.z + ((z - near.z) / d) * radius;
+    }
+  }
+  return { x, z, heading };
+}

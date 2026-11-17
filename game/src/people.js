@@ -3,8 +3,8 @@
 // capsules and spheres — no cube people — with varied height, build, skin
 // tone and hats.
 import * as THREE from 'three';
-import { makeRng, clamp, wrapAngle, dist2D, approach } from './util.js';
-import { PITCH, CITY_EDGE } from './city.js';
+import { makeRng, clamp, clamp01, damp, wrapAngle, dist2D, approach, weightedPick } from './util.js';
+import { CITY_EDGE, sidewalkSpot } from './city.js';
 import { resolveCircleColliders } from './vehicles.js';
 
 const SKINS = [0xe8b88a, 0xc98d5f, 0x8a5a34, 0xf0c8a0, 0x6b4423];
@@ -80,11 +80,224 @@ export function animateWalk(mesh, phase, amount) {
   l.legR.rotation.x = s;
 }
 
+// ROOK — the player character. A procedural street-style humanoid built
+// only from primitives in this file: teal jacket, charcoal jeans, white
+// sneakers, black cap worn backwards. No imported model, no copied asset —
+// every vertex is drawn by this code, and the look is ours alone.
+const ROOK = {
+  jacket: 0x0fa38e, jeans: 0x232a33, sneaker: 0xf2f2f2, sole: 0x1a1d22,
+  skin: 0xe8b88a, hair: 0x1a1a1a, cap: 0x14161a, capBrim: 0x0fa38e,
+  shirt: 0xe8e8e8,
+};
+
+function stdMat(color, roughness = 0.8) {
+  return new THREE.MeshStandardMaterial({ color, roughness });
+}
+
+// A jointed humanoid: hips group -> torso/head/arms, hip pivots -> thigh ->
+// knee -> shin -> sneaker. Rotations are applied at the pivots, so a walk
+// swing bends the body the way a real body bends. Local forward is +z.
+export function makePlayerMesh() {
+  const g = new THREE.Group();
+  const jacket = stdMat(ROOK.jacket);
+  const jeans = stdMat(ROOK.jeans, 0.85);
+  const skin = stdMat(ROOK.skin, 0.7);
+  const white = stdMat(ROOK.sneaker, 0.6);
+  const dark = stdMat(ROOK.sole, 0.9);
+
+  const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    return m;
+  };
+
+  const hips = new THREE.Group();
+  hips.position.y = 0.98;
+  g.add(hips);
+  hips.add(mesh(new THREE.BoxGeometry(0.44, 0.2, 0.28), jeans, 0, 0.02, 0));
+
+  const torso = new THREE.Group();
+  torso.position.y = 0.12;
+  hips.add(torso);
+  torso.add(mesh(new THREE.CapsuleGeometry(0.3, 0.42, 6, 12), jacket, 0, 0.36, 0));
+  // White tee showing through the open jacket, and a collar.
+  torso.add(mesh(new THREE.BoxGeometry(0.16, 0.42, 0.03), stdMat(ROOK.shirt), 0, 0.36, 0.29));
+  torso.add(mesh(new THREE.BoxGeometry(0.4, 0.08, 0.3), stdMat(0x0b7a68), 0, 0.62, 0));
+
+  const head = new THREE.Group();
+  head.position.y = 0.82;
+  torso.add(head);
+  head.add(mesh(new THREE.SphereGeometry(0.23, 16, 12), skin, 0, 0.1, 0));
+  head.add(mesh(new THREE.SphereGeometry(0.235, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    stdMat(ROOK.hair, 0.95), 0, 0.13, 0));
+  // Cap worn backwards: crown + brim pointing back (-z).
+  head.add(mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.1, 14), stdMat(ROOK.cap), 0, 0.3, 0));
+  head.add(mesh(new THREE.BoxGeometry(0.3, 0.035, 0.22), stdMat(ROOK.capBrim), 0, 0.27, -0.3));
+
+  const makeArm = (side) => {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(0.4 * side, 0.56, 0);
+    torso.add(shoulder);
+    shoulder.add(mesh(new THREE.CapsuleGeometry(0.105, 0.3, 4, 8), jacket, 0, -0.2, 0));
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.42;
+    shoulder.add(elbow);
+    elbow.add(mesh(new THREE.CapsuleGeometry(0.09, 0.28, 4, 8), skin, 0, -0.17, 0));
+    elbow.add(mesh(new THREE.SphereGeometry(0.105, 10, 8), skin, 0, -0.37, 0));
+    return { shoulder, elbow };
+  };
+  const armL = makeArm(-1);
+  const armR = makeArm(1);
+
+  const makeLeg = (side) => {
+    const hip = new THREE.Group();
+    hip.position.set(0.17 * side, -0.04, 0);
+    hips.add(hip);
+    hip.add(mesh(new THREE.CapsuleGeometry(0.13, 0.34, 4, 8), jeans, 0, -0.22, 0));
+    const knee = new THREE.Group();
+    knee.position.y = -0.46;
+    hip.add(knee);
+    knee.add(mesh(new THREE.CapsuleGeometry(0.11, 0.34, 4, 8), jeans, 0, -0.2, 0));
+    knee.add(mesh(new THREE.BoxGeometry(0.17, 0.11, 0.34), white, 0, -0.44, 0.05));
+    knee.add(mesh(new THREE.BoxGeometry(0.18, 0.05, 0.36), dark, 0, -0.5, 0.05));
+    return { hip, knee };
+  };
+  const legL = makeLeg(-1);
+  const legR = makeLeg(1);
+
+  g.userData.joints = {
+    hips, torso, head,
+    shoulderL: armL.shoulder, elbowL: armL.elbow,
+    shoulderR: armR.shoulder, elbowR: armR.elbow,
+    hipL: legL.hip, kneeL: legL.knee,
+    hipR: legR.hip, kneeR: legR.knee,
+  };
+  g.userData.baseHipsY = hips.position.y;
+  return g;
+}
+
+// Procedural animation state machine — the same idea as a keyframed
+// character (idle / walk / run / jump / fall / hit, priority hit >
+// airborne > grounded), but every pose is computed from the player's live
+// state in this file: no animation clips, no mixer, no imported motion.
+// Poses blend toward their target at ~12/s, the feel of a 0.18 s crossfade.
+// Rotation sign: on a limb hanging down (-y), negative rotation.x swings it
+// forward (+z), positive swings it back; elbow bend is negative rotation.x.
+const POSE_KEYS = ['hipsY', 'torsoX', 'torsoY', 'headX',
+  'shLx', 'shLz', 'elLx', 'shRx', 'shRz', 'elRx',
+  'hipLx', 'kneeLx', 'hipRx', 'kneeRx'];
+
+export class PlayerAnimator {
+  constructor(mesh) {
+    this.j = mesh.userData.joints;
+    this.baseY = mesh.userData.baseHipsY || 0.98;
+    this.state = 'idle';
+    this.time = 0;
+    this.cur = {};
+    for (const k of POSE_KEYS) this.cur[k] = 0;
+    this.cur.hipsY = this.baseY;
+  }
+
+  update(dt, s) {
+    this.time += dt;
+    const t = this.time;
+    const p = s.phase || 0;
+    let state = 'idle';
+    if (s.hit > 0) state = 'hit';
+    else if (!s.grounded) state = s.vy > 0.5 ? 'jump' : 'fall';
+    else if (s.moving) state = s.sprinting ? 'run' : 'walk';
+    this.state = state;
+
+    const c = this.cur;
+    const T = {};
+    if (state === 'idle') {
+      const b = Math.sin(t * 2.2);
+      T.hipsY = this.baseY + b * 0.012;
+      T.torsoX = 0.03 + b * 0.015; T.torsoY = 0; T.headX = 0.02;
+      T.shLx = 0.08 + b * 0.02; T.shLz = 0.06; T.elLx = -0.18;
+      T.shRx = 0.08 - b * 0.02; T.shRz = -0.06; T.elRx = -0.18;
+      T.hipLx = 0; T.kneeLx = -0.05; T.hipRx = 0; T.kneeRx = -0.05;
+    } else if (state === 'walk' || state === 'run') {
+      const run = state === 'run';
+      const A = run ? 0.95 : 0.55;
+      const armA = run ? 0.7 : 0.45;
+      const sw = Math.sin(p);
+      T.hipLx = -sw * A; T.hipRx = sw * A;
+      T.kneeLx = Math.max(0, -T.hipLx) * 1.1; T.kneeRx = Math.max(0, -T.hipRx) * 1.1;
+      T.shLx = sw * armA; T.shRx = -sw * armA;
+      T.shLz = 0.08; T.shRz = -0.08;
+      T.elLx = run ? -0.95 : -0.3; T.elRx = run ? -0.95 : -0.3;
+      T.torsoX = run ? 0.17 : 0.07; T.torsoY = 0; T.headX = 0.02;
+      T.hipsY = this.baseY + Math.abs(Math.cos(p)) * (run ? 0.06 : 0.035);
+    } else if (state === 'jump') {
+      T.hipsY = this.baseY;
+      T.hipLx = -0.85; T.kneeLx = 1.15; T.hipRx = -0.55; T.kneeRx = 0.9;
+      T.shLx = -2.2; T.shLz = 0.25; T.elLx = -0.35;
+      T.shRx = -2.2; T.shRz = -0.25; T.elRx = -0.35;
+      T.torsoX = 0.06; T.torsoY = 0; T.headX = -0.05;
+    } else if (state === 'fall') {
+      T.hipsY = this.baseY;
+      T.hipLx = -0.35; T.kneeLx = 0.55; T.hipRx = -0.25; T.kneeRx = 0.5;
+      T.shLx = -0.5; T.shLz = -0.85; T.elLx = -0.4;
+      T.shRx = -0.5; T.shRz = 0.85; T.elRx = -0.4;
+      T.torsoX = 0.1; T.torsoY = 0; T.headX = 0;
+    } else { // hit: flinch back, arms up defensively, quick decay
+      T.hipsY = this.baseY - 0.03;
+      T.torsoX = -0.28; T.torsoY = 0; T.headX = -0.18;
+      T.shLx = -0.95; T.shLz = 0.3; T.elLx = -1.15;
+      T.shRx = -0.95; T.shRz = -0.3; T.elRx = -1.15;
+      T.hipLx = -0.15; T.kneeLx = 0.25; T.hipRx = -0.1; T.kneeRx = 0.25;
+    }
+    // Punch overlay: the right arm snaps forward on a sine envelope over
+    // the 0.3 s punch, torso twisting with it.
+    if (s.punch > 0) {
+      const e = Math.sin(Math.PI * (1 - clamp01(s.punch / 0.3)));
+      T.shRx = T.shRx + (-1.5 - T.shRx) * e;
+      T.elRx = T.elRx + (-0.05 - T.elRx) * e;
+      T.torsoY = -0.32 * e;
+    }
+    for (const k of POSE_KEYS) c[k] = damp(c[k], T[k], 12, dt);
+    const j = this.j;
+    j.hips.position.y = c.hipsY;
+    j.torso.rotation.x = c.torsoX; j.torso.rotation.y = c.torsoY;
+    j.head.rotation.x = c.headX;
+    j.shoulderL.rotation.x = c.shLx; j.shoulderL.rotation.z = c.shLz;
+    j.elbowL.rotation.x = c.elLx;
+    j.shoulderR.rotation.x = c.shRx; j.shoulderR.rotation.z = c.shRz;
+    j.elbowR.rotation.x = c.elRx;
+    j.hipL.rotation.x = c.hipLx; j.kneeL.rotation.x = c.kneeLx;
+    j.hipR.rotation.x = c.hipRx; j.kneeR.rotation.x = c.kneeRx;
+  }
+}
+
+// Jump: Space on foot. Gravity 28 m/s^2, launch speed 9.5 — about a
+// 1.6 m hop, enough to clear a hydrant, not a building.
+export function tryJump(player) {
+  if (!player.grounded || player.inCar) return false;
+  player.vy = 9.5;
+  player.grounded = false;
+  return true;
+}
+
+export function updateJump(player, dt) {
+  if (player.grounded) return;
+  player.vy -= 28 * dt;
+  player.y += player.vy * dt;
+  if (player.y <= 0) {
+    player.y = 0; player.vy = 0; player.grounded = true;
+  }
+}
+
 export class Player {
   constructor(scene, x, z) {
-    this.mesh = makePersonMesh({ seed: 7, shirt: 0xc23b2e, skin: 0xe8b88a, cap: true, scale: 1.02 });
+    this.mesh = makePlayerMesh();
     scene.add(this.mesh);
+    this.animator = new PlayerAnimator(this.mesh);
     this.x = x; this.z = z;
+    this.y = 0;           // height above the ground (jump)
+    this.vy = 0;
+    this.grounded = true;
     this.heading = Math.PI; // facing the street
     this.speed = 0;
     this.walkPhase = 0;
@@ -92,9 +305,12 @@ export class Player {
     this.inCar = null; // Car instance or null
     this.punchCooldown = 0;
     this.punchAnim = 0;
+    this.hitAnim = 0;    // flinch timer, set by damagePlayer
+    this.moving = false;
+    this.sprinting = false;
   }
   syncMesh() {
-    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.position.set(this.x, this.y, this.z);
     this.mesh.rotation.y = this.heading;
   }
 }
@@ -112,6 +328,9 @@ export function movePlayer(player, input, camYaw, dt, colliders) {
   const len = Math.hypot(mx, mz);
   player.punchCooldown = Math.max(0, player.punchCooldown - dt);
   player.punchAnim = Math.max(0, player.punchAnim - dt);
+  player.hitAnim = Math.max(0, player.hitAnim - dt);
+  player.moving = len > 0.01;
+  player.sprinting = !!input.sprint && player.moving;
   if (len > 0.01) {
     mx /= len; mz /= len;
     player.heading = Math.atan2(mx, mz);
@@ -121,11 +340,21 @@ export function movePlayer(player, input, camYaw, dt, colliders) {
     player.x = clamp(hit.x, -CITY_EDGE, CITY_EDGE);
     player.z = clamp(hit.z, -CITY_EDGE, CITY_EDGE);
     player.walkPhase += dt * speed * 1.6;
-    animateWalk(player.mesh, player.walkPhase, 0.7);
     player.syncMesh();
+    // The animator reads the live state every frame, so the visible body
+    // always matches what the player is actually doing.
+    player.animator.update(dt, {
+      moving: player.moving, sprinting: player.sprinting,
+      grounded: player.grounded, vy: player.vy,
+      hit: player.hitAnim, punch: player.punchAnim, phase: player.walkPhase,
+    });
     return hit.collided;
   }
-  animateWalk(player.mesh, player.walkPhase, 0);
+  player.animator.update(dt, {
+    moving: false, sprinting: false,
+    grounded: player.grounded, vy: player.vy,
+    hit: player.hitAnim, punch: player.punchAnim, phase: player.walkPhase,
+  });
   player.syncMesh();
   return false;
 }
@@ -191,25 +420,23 @@ export function updatePedestrian(ped, dt, colliders, playerPos, danger) {
   ped.syncMesh();
 }
 
-export function spawnPedestrians(scene, rng, count = 44) {
+export function spawnPedestrians(scene, rng, count = 48, center = null, roadCoords = null) {
   const peds = [];
-  // Pedestrians walk in small groups of 2–3 so the sidewalks feel lived in.
+  // Pedestrians walk in small groups of 2–3 on the sidewalks, so the
+  // sidewalks feel lived in. Most groups gather near the player spawn
+  // (the safehouse), the rest spread across the city, and every group
+  // starts on a sidewalk slab walking along its road.
+  const roads = roadCoords || [-240, -160, -80, 0, 80, 160, 240];
   while (peds.length < count) {
-    const bx = rng.int(-3, 2), bz = rng.int(-3, 2);
-    const cx = (bx + 0.5) * PITCH, cz = (bz + 0.5) * PITCH;
-    const edge = rng.pick(['n', 's', 'e', 'w']);
-    let x = cx, z = cz;
-    if (edge === 'n') z = cz - 33;
-    if (edge === 's') z = cz + 33;
-    if (edge === 'e') x = cx + 33;
-    if (edge === 'w') x = cx - 33;
-    const group = rng.int(1, 3);
-    const heading = rng.range(0, Math.PI * 2);
+    // 3 in 5 groups spawn near the player spawn, the rest anywhere.
+    const near = center ? weightedPick(rng, [center, null], [3, 2]) : null;
+    const spot = sidewalkSpot(rng, roads, near, 170);
+    const group = rng.int(2, 3);
     for (let k = 0; k < group && peds.length < count; k++) {
       const ped = new Pedestrian(scene, rng,
-        x + rng.range(-4, 4) + k * 1.6, z + rng.range(-4, 4) + k * 1.2);
-      ped.heading = heading;
-      ped.targetHeading = heading;
+        spot.x + rng.range(-2, 2) + k * 1.6, spot.z + rng.range(-2, 2) + k * 1.2);
+      ped.heading = spot.heading + rng.range(-0.2, 0.2);
+      ped.targetHeading = ped.heading;
       peds.push(ped);
     }
   }

@@ -151,10 +151,12 @@ export class Car {
   }
   get pos() { return { x: this.x, z: this.z }; }
   forward() { return { x: Math.cos(this.heading), z: -Math.sin(this.heading) }; }
-  syncMesh() {
+  syncMesh(dt = 1 / 60) {
     this.mesh.position.set(this.x, 0, this.z);
     this.mesh.rotation.y = this.heading;
-    const spin = this.speed * 0.06;
+    // Wheel spin scales with real time, not with the frame count, so the
+    // wheels turn at the same speed on a 30 fps laptop and a 144 Hz one.
+    const spin = this.speed * 3.6 * dt;
     for (const w of this.mesh.userData.wheels) w.rotation.z += spin;
   }
 }
@@ -194,7 +196,7 @@ export function drivePlayerCar(car, input, dt, colliders) {
   }
   car.x = nx; car.z = nz;
   car.crashCooldown = Math.max(0, car.crashCooldown - dt);
-  car.syncMesh();
+  car.syncMesh(dt);
   return hit.collided;
 }
 
@@ -231,6 +233,16 @@ export function pointInColliders(x, z, colliders) {
     if (x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ) return true;
   }
   return false;
+}
+
+// Flash a police car's light bar. Shared by the chase and the patrol
+// paths so a patrolling police car flashes too, not just a chasing one.
+function flashPoliceLights(car, dt) {
+  if (!car.mesh.userData.policeLights) return;
+  const [r, b] = car.mesh.userData.policeLights;
+  const ph = (car.sirenPhase += dt * 6) % 2;
+  r.emissiveIntensity = ph < 1 ? 2.4 : 0.15;
+  b.emissiveIntensity = ph < 1 ? 0.15 : 2.4;
 }
 
 // Traffic: each car follows its road lane; at intersections it may turn
@@ -286,7 +298,8 @@ export function updateTraffic(car, dt, others, colliders) {
   const hit = resolveCircleColliders(nx, nz, 1.6, colliders);
   car.x = hit.x; car.z = hit.z;
   if (hit.collided) car.speed *= 0.5;
-  car.syncMesh();
+  flashPoliceLights(car, dt);
+  car.syncMesh(dt);
 }
 
 // Police chase: steer toward the target, ram at close range, give up and
@@ -307,14 +320,8 @@ export function updatePoliceCar(car, target, dt, colliders) {
   car.x = hit.x; car.z = hit.z;
   if (hit.collided) car.speed *= 0.5;
   car.crashCooldown = Math.max(0, car.crashCooldown - dt);
-  // Flash the light bar.
-  if (car.mesh.userData.policeLights) {
-    const [r, b] = car.mesh.userData.policeLights;
-    const ph = (car.sirenPhase += dt * 6) % 2;
-    r.emissiveIntensity = ph < 1 ? 2.4 : 0.15;
-    b.emissiveIntensity = ph < 1 ? 0.15 : 2.4;
-  }
-  car.syncMesh();
+  flashPoliceLights(car, dt);
+  car.syncMesh(dt);
   return d;
 }
 

@@ -9,7 +9,7 @@ import {
   makeCarMesh, Car, drivePlayerCar, updateTraffic, updatePoliceCar,
   spawnTrafficCars, spawnParkedCars, makePoliceCar, pointInColliders,
 } from './vehicles.js';
-import { Player, movePlayer, spawnPedestrians, updatePedestrian, FootCop, updateFootCop } from './people.js';
+import { Player, movePlayer, spawnPedestrians, updatePedestrian, FootCop, updateFootCop, tryJump, updateJump } from './people.js';
 import { createMissions } from './missions.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
@@ -72,7 +72,7 @@ export class Game {
     this.player = new Player(this.scene, this.city.spawn.x, this.city.spawn.z);
     this.traffic = spawnTrafficCars(this.scene, this.rng, this.city.colliders, 14);
     this.parked = spawnParkedCars(this.scene, this.rng, 12);
-    this.peds = spawnPedestrians(this.scene, this.rng, 44);
+    this.peds = spawnPedestrians(this.scene, this.rng, 48, this.city.spawn, this.city.roadCoords);
     this.policeCars = [];
     this.footCops = [];
     this.courier = null;
@@ -154,6 +154,11 @@ export class Game {
     this.hud.toast('SOLMAR BAY IS YOURS — $2,850 earned. Free roam!', 'good');
   }
 
+  // Mission 6 needs two unrobbed shops: when the player already robbed
+  // nearly every storefront in free roam, the shops restock so the job
+  // stays completable instead of soft-locking.
+  resetRobbedStores() { this.robbedStores.clear(); }
+
   // ---- save / load ----------------------------------------------------------
   saveGame() {
     try {
@@ -193,6 +198,8 @@ export class Game {
         this.input[keyMap[e.code]] = true;
         if (e.code === 'Space') e.preventDefault();
       }
+      // Space on foot is a jump (in a car it is the handbrake, via input).
+      if (e.code === 'Space') this.tryJump();
       if (e.code === 'KeyE') { this.eHeld = true; this.onInteract(); }
       if (e.code === 'KeyF') this.onPunch();
       if (e.code === 'KeyN') this.onNextMission();
@@ -301,8 +308,9 @@ export class Game {
     this.wanted = 0;
     this.hud.setWanted(0);
     this.audio.setSiren(false);
-    this.player.x = this.city.safehouse.x + 14;
-    this.player.z = this.city.safehouse.z + 6;
+    this.player.x = this.city.spawn.x;
+    this.player.z = this.city.spawn.z;
+    this.player.y = 0; this.player.vy = 0; this.player.grounded = true;
     if (this.player.inCar) {
       this.scene.remove(this.player.inCar.mesh);
       this.player.inCar = null;
@@ -333,6 +341,16 @@ export class Game {
     return best;
   }
 
+  // Space on foot: hop. Returns true when a jump actually started.
+  tryJump() {
+    if (this.state !== 'playing' || this.player.inCar) return false;
+    if (tryJump(this.player)) {
+      this.audio.jump();
+      return true;
+    }
+    return false;
+  }
+
   onInteract() {
     if (this.state !== 'playing') return;
     // Robbery hold is separate: holding E near a store is handled in update.
@@ -346,19 +364,17 @@ export class Game {
       this.player.heading = car.heading;
       this.player.inCar = null;
       car.speed = 0;
+      this.player.y = 0; this.player.vy = 0; this.player.grounded = true;
       this.player.syncMesh();
       return;
     }
-    // Mission 5 pickup.
-    const m = this.missions.active;
-    if (m && m.def.id === 5 && m.step === 0) {
-      const d = dist2D(this.player.x, this.player.z, m.target.x, m.target.z);
-      if (d < 5) return; // tick() advances the step on arrival
-    }
+    // Mission 5's pickup advances on arrival (missions.js tick), so there
+    // is nothing to do on E here — walk to the marker and it is collected.
     const car = this.nearestCar(4.5);
     if (car) {
       this.player.inCar = car;
       car.kind = 'player';
+      this.player.y = 0; this.player.vy = 0; this.player.grounded = true;
       // Taking a parked car or a traffic car is a crime.
       this.addWanted(1, 'Car stolen — the cops noticed!');
       // Remove from its old list so traffic logic stops driving it.
@@ -458,7 +474,7 @@ export class Game {
   }
 
   playerPos3() {
-    return new THREE.Vector3(this.player.x, 1.4, this.player.z);
+    return new THREE.Vector3(this.player.x, 1.4 + (this.player.y || 0), this.player.z);
   }
 
   showTracer(from, to) {
@@ -572,6 +588,8 @@ export class Game {
   damagePlayer(n, cause) {
     if (this.state !== 'playing') return;
     this.player.hp -= n;
+    // The hit flinch is driven by the animation state machine.
+    this.player.hitAnim = 0.35;
     this.hud.setHealth(this.player.hp);
     this.hud.damageFlash();
     if (this.player.hp <= 0) {
@@ -605,6 +623,8 @@ export class Game {
     } else {
       p.mesh.visible = true;
       movePlayer(p, this.input, this.camYaw, dt, this.city.colliders);
+      updateJump(p, dt);
+      p.syncMesh();
       this.audio.setEngine(0, false);
     }
 
@@ -691,7 +711,7 @@ export class Game {
       const f = c.forward();
       c.x += f.x * c.speed * dt;
       c.z += f.z * c.speed * dt;
-      c.syncMesh();
+      c.syncMesh(dt);
     }
 
     // Missions.
@@ -794,10 +814,10 @@ export class Game {
     finalDist = Math.max(3, finalDist);
     this.camera.position.set(
       p.x + Math.sin(this.camYaw) * Math.cos(pitch) * finalDist,
-      2.2 + Math.sin(pitch) * finalDist,
+      2.2 + (p.y || 0) + Math.sin(pitch) * finalDist,
       p.z + Math.cos(this.camYaw) * Math.cos(pitch) * finalDist,
     );
-    this.camTarget.set(p.x, p.inCar ? 1.6 : 1.5, p.z);
+    this.camTarget.set(p.x, (p.inCar ? 1.6 : 1.5) + (p.y || 0), p.z);
     this.camera.lookAt(this.camTarget);
   }
 
@@ -806,6 +826,7 @@ export class Game {
       roads: this.city.roadCoords,
       safehouse: this.city.safehouse,
       pickups: this.city.pickupSpots,
+      peds: this.peds,
       traffic: this.traffic,
       police: this.policeCars,
       courier: this.courier,
@@ -877,12 +898,13 @@ export class Game {
       return car;
     };
     // Gather pedestrians onto the sidewalks and traffic onto the road
-    // around (cx, roadZ) so the shot has a living street in it.
+    // around (cx, roadZ) so the shot has a living street in it: twelve
+    // peds in two rows, one on each sidewalk.
     const crowd = (roadZ, cx) => {
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 12; i++) {
         const ped = this.peds[i];
-        ped.x = cx - 32 + i * 9;
-        ped.z = roadZ + (i % 2 ? -12 : 12);
+        ped.x = cx - 44 + i * 8;
+        ped.z = roadZ + (i % 2 ? -11 : 11);
         ped.alive = true;
         ped.mesh.visible = true;
         ped.mesh.rotation.x = 0;

@@ -22,8 +22,29 @@ export function makeRng(seed) {
     chance(p) { return next() < p; },
   };
 }
+// Pick an entry from `items` with probability proportional to `weights`
+// (same length, non-negative). Falls back to a uniform pick when the total
+// weight is zero, so callers never need a separate guard.
+export function weightedPick(rng, items, weights) {
+  let total = 0;
+  for (const w of weights) total += w;
+  if (total <= 0) return rng.pick(items);
+  let r = rng.next() * total;
+  for (let i = 0; i < items.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return items[i];
+  }
+  return items[items.length - 1];
+}
 
 export function clamp(v, min, max) { return v < min ? min : v > max ? max : v; }
+export function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+// Exponential damp toward a target: frame-rate independent smoothing.
+// rate ~12/s reaches the target in ~0.2 s, the same feel as a 0.18 s
+// animation crossfade. Used by the player animation state machine.
+export function damp(v, target, rate, dt) {
+  return v + (target - v) * (1 - Math.exp(-rate * dt));
+}
 export function lerp(a, b, t) { return a + (b - a) * t; }
 export function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;

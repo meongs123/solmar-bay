@@ -116,6 +116,14 @@ export function createHud(doc) {
     for (const t of state.traffic) {
       c.beginPath(); c.arc(px(t.x), pz(t.z), 2.5, 0, Math.PI * 2); c.fill();
     }
+    // Pedestrians (amber dots) — the streets read as lived-in on the map.
+    if (state.peds) {
+      c.fillStyle = '#e0a83c';
+      for (const pd of state.peds) {
+        if (!pd.alive) continue;
+        c.beginPath(); c.arc(px(pd.x), pz(pd.z), 1.8, 0, Math.PI * 2); c.fill();
+      }
+    }
     const flash = Math.floor(performance.now() / 300) % 2 === 0;
     c.fillStyle = flash ? '#ff2a22' : '#2266ff';
     for (const p of state.police) {
@@ -135,12 +143,13 @@ export function createHud(doc) {
       c.fillStyle = '#ffc46a';
       c.beginPath(); c.arc(px(state.marker.x), pz(state.marker.z), 2.5, 0, Math.PI * 2); c.fill();
     }
-    // Player arrow, rotated to the heading.
+    // Player arrow, rotated to the heading — Rook's teal, so the player
+    // reads distinct from the white traffic dots on the map.
     c.save();
     c.translate(px(state.player.x), pz(state.player.z));
     c.rotate(-state.player.heading + Math.PI / 2);
-    c.fillStyle = '#ffffff';
-    c.strokeStyle = '#111111';
+    c.fillStyle = '#14d8b8';
+    c.strokeStyle = '#062a24';
     c.lineWidth = 1.5;
     c.beginPath();
     c.moveTo(0, -7); c.lineTo(5, 6); c.lineTo(0, 3); c.lineTo(-5, 6); c.closePath();

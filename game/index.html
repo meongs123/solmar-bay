@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="SOLMAR BAY — an original open-world crime game: play as Rook, steal cars, outrun the bay police, run six story missions in a living bay city with 48 pedestrians on the sidewalks.">
 <title>SOLMAR BAY — an open-world crime game</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23c23b2e'/%3E%3Ctext x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230fa38e'/%3E%3Ctext x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0e14;
     font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; }
@@ -60,15 +61,15 @@
   .screen { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center;
     flex-direction: column; background: linear-gradient(180deg, rgba(10,14,22,0.55), rgba(10,14,22,0.88)); text-align: center; }
   .screen h1 { font-size: 64px; margin: 0; letter-spacing: 6px; font-weight: 900;
-    background: linear-gradient(180deg, #ffd98a, #c23b2e); -webkit-background-clip: text; background-clip: text;
+    background: linear-gradient(180deg, #ffd98a, #0fa38e); -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent; text-shadow: 0 4px 24px rgba(0,0,0,0.5); }
   .screen h2 { font-size: 30px; margin: 0 0 8px; letter-spacing: 3px; }
   .screen .sub { font-size: 16px; opacity: 0.9; margin: 10px 0 4px; max-width: 560px; line-height: 1.5; }
   .screen .keys { font-size: 13px; opacity: 0.75; margin: 14px 0 22px; line-height: 1.8; }
   .screen .keys b { color: #ffc46a; }
   button { pointer-events: auto; cursor: pointer; font-size: 16px; font-weight: 700; letter-spacing: 1px;
-    color: #fff; background: #c23b2e; border: none; border-radius: 9px; padding: 13px 30px; margin: 5px; }
-  button:hover { background: #d94f3d; }
+    color: #fff; background: #0e8a76; border: none; border-radius: 9px; padding: 13px 30px; margin: 5px; }
+  button:hover { background: #0fa38e; }
   button.ghost { background: rgba(255,255,255,0.14); }
   button.ghost:hover { background: rgba(255,255,255,0.25); }
   #menu { display: flex; }
@@ -97,7 +98,7 @@
   <div id="speed-wrap" class="panel"><div id="speed">0</div><div class="unit">KM/H</div></div>
   <div id="weapon" class="panel"></div>
   <canvas id="minimap" width="300" height="300"></canvas>
-  <div id="controls-hint" class="panel">WASD move / drive · E enter car · F punch · Click shoot (pistol) · Space handbrake · Shift sprint · N next mission · P pause · M mute · drag mouse to look</div>
+  <div id="controls-hint" class="panel">WASD move / drive · E enter car · F punch · Click shoot (pistol) · Space jump / handbrake · Shift sprint · N next mission · P pause · M mute · drag mouse to look</div>
   <div id="toasts"></div>
   <div id="crosshair"></div>
 </div>
@@ -105,8 +106,8 @@
 
 <div id="menu" class="screen">
   <h1>SOLMAR BAY</h1>
-  <p class="sub">A sun-soaked bay city. Steal cars, outrun the bay police, run six jobs for Rook and Mara — and take the city for yourself. An original open-world crime game. Nothing here belongs to any other game.</p>
-  <p class="keys"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>N</b> next mission &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute<br>Hold <b>E</b> at a shopfront to rob it. Pick up the pistol on the green dots. Save from the pause menu.</p>
+  <p class="sub">A sun-soaked bay city. Play as Rook — teal jacket, backwards cap, quick feet. Steal cars, outrun the bay police, run six jobs for Rook and Mara — and take the city for yourself. An original open-world crime game. Nothing here belongs to any other game.</p>
+  <p class="keys"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>Space</b> jump (on foot) / handbrake (driving) &nbsp;·&nbsp; <b>N</b> next mission &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute<br>Hold <b>E</b> at a shopfront to rob it. Pick up the pistol on the green dots. Save from the pause menu.<br>48 pedestrians walk the sidewalks in groups — the amber dots on the minimap.</p>
   <div>
     <button id="btn-start">▶ START</button>
     <button id="btn-continue" class="ghost" style="display:none">CONTINUE (SAVE)</button>

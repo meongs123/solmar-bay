@@ -27,13 +27,31 @@ window.__debug = {
     errors: game.errors,
     police: game.policeCars.length,
     footCops: game.footCops.filter((c) => c.alive).length,
+    peds: game.peds.length,
+    pedsAlive: game.peds.filter((p) => p.alive).length,
+    anim: game.player.animator ? game.player.animator.state : null,
+    playerY: Math.round((game.player.y || 0) * 100) / 100,
+    grounded: game.player.grounded,
+    pedsNear: (x, z, r) => game.peds.filter(
+      (p) => p.alive && Math.hypot(p.x - x, p.z - z) < r).length,
   }),
   teleport: (x, z) => {
     game.player.x = x; game.player.z = z;
     game.player.syncMesh();
   },
+  // Teleport the player together with the car they are driving, so
+  // scripted play-tests can drive missions without steering by hand.
+  teleportCar: (x, z) => {
+    if (game.player.inCar) {
+      game.player.inCar.x = x; game.player.inCar.z = z;
+      game.player.inCar.syncMesh();
+    }
+    game.player.x = x; game.player.z = z;
+    game.player.syncMesh();
+  },
   pressE: () => game.onInteract(),
   pressN: () => game.onNextMission(),
+  jump: () => game.tryJump(),
   holdW: (on) => { game.input.forward = on; },
   givePistol: () => {
     game.hasPistol = true;

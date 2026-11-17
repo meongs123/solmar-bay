@@ -7,6 +7,7 @@ export function createAudio() {
   let master = null;
   let engineOsc = null, engineGain = null;
   let sirenOsc = null, sirenGain = null;
+  let sirenTimer = null, sirenPhase = 0;
   let padOsc = null, padGain = null;
   let muted = false;
   let musicTimer = null;
@@ -95,9 +96,21 @@ export function createAudio() {
     setSiren(on) {
       if (!ctx) return;
       sirenGain.gain.setTargetAtTime(on && !muted ? 0.035 : 0, ctx.currentTime, 0.2);
-      if (on) sirenOsc.frequency.setTargetAtTime(650 + Math.sin(Date.now() / 350) * 220, ctx.currentTime, 0.05);
+      // The wail sweeps up and down while it is on; a static tone does not.
+      if (on && !sirenTimer) {
+        sirenTimer = setInterval(() => {
+          if (!ctx || !sirenOsc) return;
+          sirenPhase += 0.25;
+          sirenOsc.frequency.setTargetAtTime(650 + Math.sin(sirenPhase) * 220, ctx.currentTime, 0.05);
+        }, 50);
+      } else if (!on && sirenTimer) {
+        clearInterval(sirenTimer);
+        sirenTimer = null;
+      }
     },
     punch() { blip(140, 0.12, 'square', 0.2, 70); },
+    // Jump: a short rising chirp, low enough not to fight the bass pad.
+    jump() { blip(300, 0.12, 'sine', 0.15, 540); },
     shoot() { blip(900, 0.09, 'sawtooth', 0.22, 120); },
     hit() { blip(220, 0.1, 'square', 0.18, 90); },
     pickup() { jingle([660, 880]); },

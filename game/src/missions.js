@@ -30,7 +30,7 @@ const MISSION_DEFS = [
   {
     id: 5, title: 'Pickup', reward: 400,
     brief: 'A package waits at the old pier market. Pick it up on foot and bring it home.',
-    start: 'Go to the pickup point and press E.',
+    start: 'Walk to the pickup point — the package is collected on arrival.',
   },
   {
     id: 6, title: 'The Big Score', reward: 1400,
@@ -81,7 +81,9 @@ export function createMissions(scene, city) {
         a.timer = 100;
         a.target = a.drops[0];
       } else if (def.id === 3) {
-        a.timer = 45;
+        // 60 s so the "lose the heat" path is actually reachable: the heat
+        // needs 25 s clean + 12 s per star to decay from 2 stars (~49 s).
+        a.timer = 60;
         a.target = { x: city.safehouseTarget.x, z: city.safehouseTarget.z };
         G.setWanted(2, 'The cops are on you!');
       } else if (def.id === 4) {
@@ -94,6 +96,14 @@ export function createMissions(scene, city) {
         a.target = { x: -160, z: -80 };
       } else if (def.id === 6) {
         M.robbed = 0;
+        // The job needs two fresh shops: if the player already robbed
+        // nearly every storefront in free roam, restock them first.
+        const unrobbed = city.storeSpots.filter(
+          (s) => !G.robbedStoreNames().includes(s.name));
+        if (unrobbed.length < 2) {
+          G.resetRobbedStores();
+          G.toast('The shops restocked — two fresh targets.', 'info');
+        }
         a.target = nearestStore(G.playerPos(), city);
       }
       M.active = a;
@@ -213,7 +223,11 @@ export function createMissions(scene, city) {
         case 6: {
           if (M.robbed >= 2) {
             a.target = { x: city.safehouseTarget.x, z: city.safehouseTarget.z };
-            if (d < 7) M.complete(G);
+            // NOTE: measure against the NEW target (the safehouse), not the
+            // stale `d` computed at the top of tick against the old store
+            // target — the player stands on that store, so the stale d is
+            // ~0 and the story would complete without the final drive home.
+            if (dist2D(p.x, p.z, a.target.x, a.target.z) < 7) M.complete(G);
           } else {
             const s = nearestUnrobbedStore(G, city);
             if (s) a.target = { x: s.x, z: s.z };

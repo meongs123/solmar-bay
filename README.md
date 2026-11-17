@@ -22,15 +22,25 @@ score that takes the city.
 - **Driving:** arcade physics, four car body styles, 14 traffic cars that
   turn at intersections, 12 parked cars to steal, police cars that patrol,
   chase and ram.
-- **On foot:** walk and sprint, building collision, punch pedestrians,
+- **Rook, the player:** a procedural humanoid built only from code —
+  teal jacket, charcoal jeans, white sneakers, black cap worn backwards.
+  A procedural animation state machine drives him from his live state:
+  idle breathing, walk and run leg/arm swings (bigger and faster when
+  sprinting), jump tuck and falling pose, a hit flinch, and a punch swing.
+  Space jumps on foot; the collision stays a simple capsule, so the
+  character looks human while the gameplay stays predictable.
+- **On foot:** walk and sprint, jump, building collision, punch pedestrians,
   pistol pickups with hitscan shooting, foot cops at wanted 3+.
+- **Living streets:** 48 pedestrians walk the sidewalks in groups of 2–3,
+  denser around the safehouse — amber dots on the minimap, and they flee
+  when you hit them or fire nearby.
 - **Wanted:** crimes raise stars; police cars spawn at intersections and
   hunt you; heat decays when you stay clean and out of sight. Get busted
   or wasted and you wake up at the safehouse, lighter in the wallet.
 - **Missions:** six chained jobs with timers, a stealth tail, a pickup and
   two store robberies — $150 to $2,850 in total.
 - **HUD:** health, money, wanted stars, live round minimap (roads, traffic,
-  police, mission marker, safehouse, pistol pickups), speed, mission
+  pedestrians, police, mission marker, safehouse, pistol pickups), speed, mission
   objective with distance, toasts and a damage vignette.
 - **Menus & save:** start menu, pause menu, busted/wasted/complete screens,
   save to localStorage with Continue on the menu.
@@ -46,7 +56,7 @@ score that takes the city.
 | E | Enter / exit car (stealing = +1 wanted) · hold E at a shopfront to rob it |
 | F | Punch |
 | Click | Shoot the pistol (after picking one up) |
-| Space | Handbrake |
+| Space | Jump (on foot) · handbrake (driving) |
 | Shift | Sprint |
 | N | Start / retry the next mission |
 | P / Esc | Pause · M mute |
