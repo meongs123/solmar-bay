@@ -37,6 +37,11 @@ const MISSION_DEFS = [
     brief: 'Two shops, one night, no alarms — the score that makes Rook and Mara rich. Rob both stores, then vanish to the safehouse.',
     start: 'Rob two stores — hold E at a shopfront.',
   },
+  {
+    id: 7, title: 'The Marina Vault', reward: 1600,
+    brief: 'The marina vault holds the harbour cash — the final job. Crack it, grab the money, and vanish to the safehouse before the whole bay wakes up.',
+    start: 'Crack the marina vault — hold E at the vault door.',
+  },
 ];
 
 // Dialogue lines for the HUD dialogue card (hud.dialogue). Rook speaks in
@@ -49,6 +54,7 @@ const DIALOGUE = {
   4: { speaker: 'MARA', color: '#ffc46a', start: 'Follow the courier. Close enough to see him, far enough to stay invisible.', complete: 'Ledger is ours. He never knew you were there.', fail: 'You lost him. The ledger stays with the harbour.' },
   5: { speaker: 'ROOK', color: '#14d8b8', start: 'Package waits at the old pier market. On foot — no wheels for this one.', complete: 'Package secured. Bring it home.', fail: null },
   6: { speaker: 'MARA', color: '#ffc46a', start: 'Two shops, one night, no alarms. Then vanish.', complete: 'The big score. We are rich, Rook.', fail: null },
+  7: { speaker: 'MARA', color: '#ffc46a', start: 'The vault, the marina, one last job. Crack it and we are done.', complete: 'Sixteen hundred. We are done, Rook. The bay is ours.', fail: null },
 };
 
 function speak(G, id, kind) {
@@ -123,6 +129,10 @@ export function createMissions(scene, city) {
           G.toast('The shops restocked — two fresh targets.', 'info');
         }
         a.target = nearestStore(G.playerPos(), city);
+      } else if (def.id === 7) {
+        // The finale: the vault is the shopfront nearest the marina corner.
+        a.target = nearestStoreTo({ x: 160, z: -160 }, city);
+        a.vaultHold = 0;
       }
       M.active = a;
       G.toast(`${def.title} — ${def.start}`, 'mission');
@@ -152,6 +162,8 @@ export function createMissions(scene, city) {
       M.index++;
       G.toast(`${a.def.title} complete — +$${reward}`, 'good');
       speak(G, a.def.id, 'complete');
+      // The finale pays in hardware too: the vault crew leaves a shotgun.
+      if (a.def.id === 7 && G.grantShotgun) G.grantShotgun();
       if (G.hud && G.hud.setRespect) G.hud.setRespect(M.completed);
       G.audioJingle('complete');
       M.active = null;
@@ -257,19 +269,27 @@ export function createMissions(scene, city) {
           }
           break;
         }
+        case 7: {
+          // Step 0 is the vault crack (game.updateVault drives a.vaultHold
+          // and flips the step); step 1 is the run home to the safehouse.
+          if (a.step === 1 && dist2D(p.x, p.z, a.target.x, a.target.z) < 7) {
+            M.complete(G);
+          }
+          break;
+        }
         default:
           break;
       }
     },
 
     // Objective line for the HUD, plus the live distance to the marker.
-    // Title carries the stage (Job X of 6); text carries the NEXT step.
+    // Title carries the stage (Job X of 7); text carries the NEXT step.
     objectiveText(G) {
       const a = M.active;
       if (!a) {
         if (M.isStoryDone()) return { title: 'Free roam', text: 'SOLMAR BAY IS YOURS — explore, earn, survive.', dist: null };
         const next = MISSION_DEFS[M.index];
-        return { title: `${next.title} — Job ${M.index + 1}/6`, text: `NEXT: ${next.start}`, dist: null };
+        return { title: `${next.title} — Job ${M.index + 1}/7`, text: `NEXT: ${next.start}`, dist: null };
       }
       const p = G.playerPos();
       let t = a.target;
@@ -280,6 +300,11 @@ export function createMissions(scene, city) {
       if (a.def.id === 3) text = `Lose the cops — ${Math.max(0, Math.ceil(a.timer))}s left (or reach 0 stars)`;
       if (a.def.id === 4) text = `Tail progress: ${Math.min(100, Math.round((a.progress / 25) * 100))}% — stay 8–32m back`;
       if (a.def.id === 6) text = `Stores robbed: ${M.robbed}/2${M.robbed >= 2 ? ' — get to the safehouse!' : ' — hold E at a shopfront'}`;
+      if (a.def.id === 7) {
+        text = a.step === 0
+          ? `Vault crack: ${Math.min(100, Math.round(((a.vaultHold || 0) / 4) * 100))}% — hold E at the vault door`
+          : 'Vault open — get to the safehouse!';
+      }
       let next = '';
       if (a.def.id === 1) next = a.step === 0 ? 'Steal a car' : 'Drive to the garage';
       else if (a.def.id === 2) next = `Drop ${a.dropIdx + 1} of 2`;
@@ -287,13 +312,24 @@ export function createMissions(scene, city) {
       else if (a.def.id === 4) next = 'Stay 8–32m back';
       else if (a.def.id === 5) next = a.step === 0 ? 'Reach the pickup' : 'Return to the safehouse';
       else if (a.def.id === 6) next = M.robbed >= 2 ? 'Get to the safehouse' : 'Rob a store';
-      return { title: `${a.def.title} — Job ${a.def.id}/6`, text: `NEXT: ${next} · ${text}`, dist };
+      else if (a.def.id === 7) next = a.step === 0 ? 'Crack the vault' : 'Get to the safehouse';
+      return { title: `${a.def.title} — Job ${a.def.id}/7`, text: `NEXT: ${next} · ${text}`, dist };
     },
   };
   return M;
 }
 
 function nearestStore(p, city) {
+  let best = city.storeSpots[0], bd = 1e9;
+  for (const s of city.storeSpots) {
+    const d = dist2D(p.x, p.z, s.x, s.z);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+// The vault is the shopfront nearest a fixed point (the marina corner).
+function nearestStoreTo(p, city) {
   let best = city.storeSpots[0], bd = 1e9;
   for (const s of city.storeSpots) {
     const d = dist2D(p.x, p.z, s.x, s.z);

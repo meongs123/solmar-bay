@@ -190,6 +190,8 @@ export class Car {
     this.cruise = opts.cruise || 9;
     this.turnAt = null;
     this.crashCooldown = 0;
+    this.condition = 100; // vehicle condition 100–0; wear slows the car, 0 stalls it
+    this.condCleanT = 0;  // seconds since the last damage (recovery window)
     this.sirenPhase = Math.random() * 10;
     this.stuckTimer = 0;
   }
@@ -206,12 +208,17 @@ export class Car {
 }
 
 // Arcade driving: W accelerates, S brakes/reverses, A/D steer (speed-scaled),
-// Space is the handbrake. Returns nothing; mutates the car.
+// Space is the handbrake. Vehicle condition scales the car: a worn car is
+// slower and lazier to steer; at 0 the car stalls and cannot drive.
+// Returns nothing; mutates the car.
 export function drivePlayerCar(car, input, dt, colliders) {
-  const accel = input.forward ? 22 : 0;
+  const cond = car.condition == null ? 100 : car.condition;
+  const stalled = cond <= 0;
+  const condF = stalled ? 0 : 0.35 + 0.65 * (cond / 100);
+  const accel = (input.forward ? 22 : 0) * (stalled ? 0 : 0.5 + 0.5 * (cond / 100));
   const brake = input.back ? 26 : 0;
-  const maxSpeed = 34;
-  const maxReverse = 10;
+  const maxSpeed = 34 * condF;
+  const maxReverse = 10 * condF;
   if (input.forward) car.speed += accel * dt;
   if (input.back) {
     if (car.speed > 0.5) car.speed -= brake * dt;
@@ -221,9 +228,10 @@ export function drivePlayerCar(car, input, dt, colliders) {
     car.speed = approach(car.speed, 0, 10 * dt);
   }
   if (input.handbrake) car.speed = approach(car.speed, 0, 40 * dt);
+  if (stalled) car.speed = approach(car.speed, 0, 30 * dt);
   car.speed = clamp(car.speed, -maxReverse, maxSpeed);
   const steerTarget = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-  const steerMax = 0.55 * clamp(1 - Math.abs(car.speed) / 40, 0.35, 1);
+  const steerMax = 0.55 * clamp(1 - Math.abs(car.speed) / 40, 0.35, 1) * (stalled ? 0 : 0.6 + 0.4 * (cond / 100));
   car.steer = approach(car.steer, steerTarget * steerMax, 3.2 * dt);
   const turnRate = car.steer * clamp(Math.abs(car.speed) / 6, 0, 1.6);
   car.heading += turnRate * dt * Math.sign(car.speed || 1);

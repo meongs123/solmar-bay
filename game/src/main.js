@@ -23,6 +23,13 @@ window.__debug = {
     z: Math.round(game.player.z),
     ammo: game.pistolAmmo,
     hasPistol: game.hasPistol,
+    weapon: game.currentWeapon,
+    weaponAmmo: game.weaponAmmoOf(game.currentWeapon),
+    smg: game.hasSmg,
+    shotgun: game.hasShotgun,
+    missionStep: game.missions.active ? game.missions.active.step : null,
+    heli: !!game.heli,
+    cond: game.player.inCar ? Math.round(game.player.inCar.condition) : null,
     robbed: game.robbedStores.size,
     errors: game.errors,
     police: game.policeCars.length,
@@ -51,12 +58,18 @@ window.__debug = {
   },
   pressE: () => game.onInteract(),
   pressN: () => game.onNextMission(),
+  // Inject a real keydown through the game's own handler, so scripted
+  // tests exercise the same path a player does (map toggle, weapon keys…).
+  pressKey: (code) => window.dispatchEvent(new KeyboardEvent('keydown', { code })),
+  openMap: () => game.openMap(),
+  closeMap: () => game.closeMap(),
   jump: () => game.tryJump(),
   holdW: (on) => { game.input.forward = on; },
   givePistol: () => {
     game.hasPistol = true;
     game.pistolAmmo = 12;
-    game.hud.setWeapon('PISTOL 12');
+    game.currentWeapon = 'pistol';
+    game.hud.setWeapon(game.weaponLabel());
   },
   setWanted: (n) => game.setWanted(n),
   setMoney: (n) => { game.money = n; game.hud.setMoney(n); },

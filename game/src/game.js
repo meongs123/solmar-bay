@@ -35,6 +35,29 @@ export class Game {
     this.stealthTail = false;  // mission 4: police patrol, never hunt
     this.pistolAmmo = 0;
     this.hasPistol = false;
+    // Weapon variety: pistol is the starter; SMG comes from a pickup, the
+    // shotgun is the Marina Vault reward. Keys 1/2/3 switch, Q cycles.
+    this.weaponDefs = {
+      pistol: { label: 'PISTOL', dmg: 50, cooldown: 0.35, pellets: 1, spread: 0, mag: 12 },
+      smg: { label: 'SMG', dmg: 22, cooldown: 0.09, pellets: 1, spread: 0.05, mag: 32 },
+      shotgun: { label: 'SHOTGUN', dmg: 16, cooldown: 0.8, pellets: 6, spread: 0.14, mag: 6 },
+    };
+    this.smgAmmo = 0;
+    this.shotgunAmmo = 0;
+    this.hasSmg = false;
+    this.hasShotgun = false;
+    this.currentWeapon = 'pistol';
+    this.shootCooldown = 0;
+    // Police helicopter: one unit, only at wanted >= 3. Visual + tracking
+    // only — it never damages the player, so it cannot break a mission.
+    this.heli = null;
+    this.heliRotor = null;
+    this.heliLight = null;
+    this.heliNav = null;
+    // Full-screen map state (M toggles; the game pauses while it is open).
+    this.mapOpen = false;
+    this.lastMapState = null;
+    this.menuOrbit = 0;
     this.robbedStores = new Set();
     this.robHold = 0;          // seconds of hold-E progress at a store
     this.robTarget = null;
@@ -108,6 +131,27 @@ export class Game {
       this.scene.add(m);
       this.pickupMeshes.push(m);
     }
+    // SMG pickup: one fixed spot on the west road, amber glow so it reads
+    // distinct from the green pistol dots. Respawns after 60 s.
+    this.smgSpot = { x: -165, z: 40, taken: false, respawn: 0 };
+    this.smgMesh = new THREE.Group();
+    {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.16, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.4, metalness: 0.6 }));
+      const mag = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.16), body.material);
+      mag.position.set(0.1, -0.22, 0);
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.35 }));
+      this.smgMesh.add(body, mag, glow);
+      this.smgMesh.position.set(this.smgSpot.x, 1.0, this.smgSpot.z);
+      this.scene.add(this.smgMesh);
+    }
+    // Exhaust smoke for a dying car: one reusable puff, shown over the
+    // player's car while its condition is low.
+    this.smokeMesh = new THREE.Mesh(new THREE.SphereGeometry(1.1, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0 }));
+    this.smokeMesh.position.set(0, -10, 0);
+    this.scene.add(this.smokeMesh);
     this.saveData = this.loadSave();
     this.bindInput();
     this.bindMenus();
@@ -159,7 +203,7 @@ export class Game {
   onStoryComplete() {
     this.state = 'complete';
     this.showScreen('complete');
-    this.hud.toast('SOLMAR BAY IS YOURS — $2,850 earned. Free roam!', 'good');
+    this.hud.toast('SOLMAR BAY IS YOURS — $4,450 earned. Free roam!', 'good');
   }
 
   // Mission 6 needs two unrobbed shops: when the player already robbed
@@ -202,6 +246,18 @@ export class Game {
     };
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
+      // Menu: Enter / Space starts a new game. The automated play-test
+      // skips the menu with ?auto=1, so this never blocks it.
+      if (this.state === 'menu' && (e.code === 'Enter' || e.code === 'Space')) {
+        this.startGame(false);
+        return;
+      }
+      // Full-screen map: M opens it, M or Esc closes it. It pauses the
+      // game while open, so P / Esc must not also toggle the pause menu.
+      if (this.mapOpen && (e.code === 'KeyM' || e.code === 'Escape')) {
+        this.closeMap();
+        return;
+      }
       if (keyMap[e.code] !== undefined) {
         this.input[keyMap[e.code]] = true;
         if (e.code === 'Space') e.preventDefault();
@@ -211,7 +267,8 @@ export class Game {
       if (e.code === 'KeyE') { this.eHeld = true; this.onInteract(); }
       if (e.code === 'KeyF') this.onPunch();
       if (e.code === 'KeyN') this.onNextMission();
-      if (e.code === 'KeyM') {
+      if (e.code === 'KeyM') this.openMap();
+      if (e.code === 'KeyU') {
         const m = this.audio.toggleMute();
         this.toast(m ? 'Sound muted.' : 'Sound on.', 'info');
       }
@@ -219,6 +276,10 @@ export class Game {
         this.dayTime = 8;
         this.toast('Midnight in Solmar Bay.', 'info');
       }
+      if (e.code === 'Digit1') this.switchWeapon('pistol');
+      if (e.code === 'Digit2') this.switchWeapon('smg');
+      if (e.code === 'Digit3') this.switchWeapon('shotgun');
+      if (e.code === 'KeyQ') this.cycleWeapon();
       if (e.code === 'KeyP' || e.code === 'Escape') this.togglePause();
       this.audio.unlock();
     });
@@ -263,6 +324,7 @@ export class Game {
   }
 
   showMenu() {
+    this.closeMap();
     this.hideScreens();
     document.getElementById('menu').style.display = 'flex';
     this.state = 'menu';
@@ -283,6 +345,7 @@ export class Game {
   }
 
   startGame(continueSave) {
+    this.closeMap();
     this.hideScreens();
     this.state = 'playing';
     this.audio.unlock();
@@ -304,6 +367,7 @@ export class Game {
   }
 
   togglePause() {
+    if (this.mapOpen) return; // the map owns P/Esc while it is open
     if (this.state === 'playing') {
       this.state = 'paused';
       this.showScreen('pause');
@@ -311,6 +375,169 @@ export class Game {
       this.hideScreens();
       this.state = 'playing';
     }
+  }
+
+  // ---- full-screen map -------------------------------------------------------
+  openMap() {
+    if (this.state !== 'playing' || this.mapOpen) return;
+    this.mapOpen = true;
+    this.state = 'paused'; // paused, but without the pause screen
+    if (this.hud.openBigMap) this.hud.openBigMap(this.lastMapState);
+  }
+  closeMap() {
+    if (!this.mapOpen) return;
+    this.mapOpen = false;
+    if (this.hud.closeBigMap) this.hud.closeBigMap();
+    if (this.state === 'paused') this.state = 'playing';
+  }
+
+  // ---- weapons ---------------------------------------------------------------
+  weaponAmmoOf(name) {
+    if (name === 'pistol') return this.pistolAmmo;
+    if (name === 'smg') return this.smgAmmo;
+    return this.shotgunAmmo;
+  }
+  weaponOwned(name) {
+    if (name === 'pistol') return this.hasPistol;
+    if (name === 'smg') return this.hasSmg;
+    return this.hasShotgun;
+  }
+  weaponLabel() {
+    if (!this.weaponOwned(this.currentWeapon) || this.weaponAmmoOf(this.currentWeapon) <= 0) return '';
+    return `${this.weaponDefs[this.currentWeapon].label} ${this.weaponAmmoOf(this.currentWeapon)}`;
+  }
+  hasAnyWeapon() { return this.hasPistol || this.hasSmg || this.hasShotgun; }
+  switchWeapon(name) {
+    if (this.state !== 'playing' || !this.weaponOwned(name)) return false;
+    if (this.currentWeapon === name) return true;
+    this.currentWeapon = name;
+    this.hud.setWeapon(this.weaponLabel());
+    this.toast(`${this.weaponDefs[name].label} ready.`, 'info');
+    return true;
+  }
+  cycleWeapon() {
+    if (this.state !== 'playing') return;
+    const order = ['pistol', 'smg', 'shotgun'];
+    const owned = order.filter((w) => this.weaponOwned(w));
+    if (owned.length < 2) return;
+    const i = owned.indexOf(this.currentWeapon);
+    this.switchWeapon(owned[(i + 1) % owned.length]);
+  }
+  grantShotgun() {
+    this.hasShotgun = true;
+    this.shotgunAmmo = this.weaponDefs.shotgun.mag;
+    this.currentWeapon = 'shotgun';
+    this.hud.setWeapon(this.weaponLabel());
+    this.toast('Shotgun acquired — 6 shells. Press 3 to switch.', 'good');
+  }
+
+  // ---- vehicle condition -----------------------------------------------------
+  damageCar(car, dmg) {
+    if (!car || car.condition == null) return;
+    car.condition = Math.max(0, car.condition - dmg);
+    car.condCleanT = 0;
+    if (car.condition <= 0 && !car.stalled) {
+      car.stalled = true;
+      this.toast('The car died — find another ride.', 'bad');
+    }
+  }
+
+  // ---- police helicopter -----------------------------------------------------
+  // One heli at wanted >= 3: hovers above the player with a searchlight.
+  // Visual + tracking only — it never damages the player, so it cannot
+  // break a mission. Rotor sound skipped (risky); the siren already sells it.
+  spawnHeli() {
+    if (this.heli) return;
+    const g = new THREE.Group();
+    const dark = new THREE.MeshStandardMaterial({ color: 0x1a2a4a, roughness: 0.4, metalness: 0.5 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x141c26, roughness: 0.15, metalness: 0.85 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.3, 2.0), dark);
+    body.position.y = 0;
+    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.0, 1.7), glass);
+    nose.position.set(2.4, -0.1, 0);
+    const boom = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.5, 0.5), dark);
+    boom.position.set(-3.6, 0.3, 0);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.6, 0.9), dark);
+    fin.position.set(-5.6, 0.9, 0);
+    g.add(body, nose, boom, fin);
+    // Main rotor: two blades on a mast, spun in updateHeli.
+    const rotor = new THREE.Group();
+    rotor.position.y = 1.0;
+    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x22262c, roughness: 0.5, metalness: 0.4 });
+    for (const s of [-1, 1]) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.08, 0.55), bladeMat);
+      blade.position.x = s * 2.4;
+      rotor.add(blade);
+    }
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 8), bladeMat);
+    mast.position.y = 0.35;
+    rotor.add(mast);
+    g.add(rotor);
+    // Skids.
+    for (const s of [-1, 1]) {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 0.12), bladeMat);
+      skid.position.set(0.3, -1.0, s * 0.9);
+      g.add(skid);
+    }
+    // Red nav light on the tail fin: blinks, so the dark hull reads at night.
+    const nav = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xff2a22 }));
+    nav.position.set(-5.6, 1.9, 0);
+    g.add(nav);
+    this.heliNav = nav;
+    // Searchlight cone: apex at the heli, widening down to the ground.
+    const light = new THREE.Mesh(new THREE.ConeGeometry(7, 26, 14, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.10, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    light.rotation.x = Math.PI; // apex up
+    light.position.y = -13;
+    g.add(light);
+    const t0 = this.heliTarget();
+    g.position.set(t0.x, 14, t0.z);
+    this.scene.add(g);
+    this.heli = g;
+    this.heliRotor = rotor;
+    this.heliLight = light;
+    this.toast('HELI INBOUND — the eye in the sky is on you!', 'bad');
+  }
+  // The heli hovers ahead of the player in the camera's view direction, so
+  // its body is actually visible in frame (directly overhead it is not).
+  // 14 m up, 24 m ahead: about 15° above horizontal from the chase camera,
+  // inside the top of the frame.
+  heliTarget() {
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.01) dir.set(0, 0, 1);
+    dir.normalize();
+    return { x: this.player.x + dir.x * 24, z: this.player.z + dir.z * 24 };
+  }
+  despawnHeli() {
+    if (!this.heli) return;
+    this.scene.remove(this.heli);
+    this.heli = null;
+    this.heliRotor = null;
+    this.heliLight = null;
+    this.heliNav = null;
+  }
+  updateHeli(dt) {
+    if (this.wanted >= 3 && !this.stealthTail && this.state === 'playing') {
+      if (!this.heli) this.spawnHeli();
+    } else if (this.heli && (this.wanted < 3 || this.stealthTail)) {
+      this.despawnHeli();
+      return;
+    }
+    if (!this.heli) return;
+    // Hover ahead of the player (see heliTarget), drifting after them;
+    // gentle bob, spinning rotor.
+    const h = this.heli;
+    const t = this.heliTarget();
+    h.position.x += (t.x - h.position.x) * Math.min(1, dt * 1.2);
+    h.position.z += (t.z - h.position.z) * Math.min(1, dt * 1.2);
+    h.position.y = 14 + Math.sin(this.time * 1.5) * 1.2;
+    h.rotation.y += dt * 0.4;
+    if (this.heliRotor) this.heliRotor.rotation.y += dt * 22;
+    if (this.heliLight) this.heliLight.material.opacity = 0.08 + Math.sin(this.time * 3) * 0.03;
+    if (this.heliNav) this.heliNav.visible = Math.sin(this.time * 6) > -0.2;
   }
 
   restartFromDeath() {
@@ -340,6 +567,7 @@ export class Game {
     this.policeCars = [];
     for (const c of this.footCops) this.scene.remove(c.mesh);
     this.footCops = [];
+    this.despawnHeli();
   }
 
   // ---- interaction: enter/exit car, punch, shoot, rob, missions -----------
@@ -436,18 +664,56 @@ export class Game {
   }
 
   onShoot() {
-    if (this.state !== 'playing' || this.player.inCar || !this.hasPistol || this.pistolAmmo <= 0) return;
-    this.pistolAmmo--;
+    if (this.state !== 'playing' || this.player.inCar) return;
+    const name = this.currentWeapon;
+    if (!this.weaponOwned(name) || this.weaponAmmoOf(name) <= 0) return;
+    if (this.shootCooldown > 0) return;
+    const def = this.weaponDefs[name];
+    this.shootCooldown = def.cooldown;
+    // Spend one round.
+    if (name === 'pistol') this.pistolAmmo--;
+    else if (name === 'smg') this.smgAmmo--;
+    else this.shotgunAmmo--;
     this.audio.shoot();
-    this.hud.setWeapon(`PISTOL ${this.pistolAmmo}`);
-    if (this.pistolAmmo <= 0) {
-      this.hasPistol = false;
-      setTimeout(() => this.hud.setWeapon(''), 400);
-    }
     // Hitscan from the camera through the crosshair, blocked by buildings.
-    const dir = new THREE.Vector3();
-    this.camera.getWorldDirection(dir);
+    // The shotgun fires several pellets with spread; the SMG has a small one.
+    const baseDir = new THREE.Vector3();
+    this.camera.getWorldDirection(baseDir);
     const origin = this.camera.position.clone();
+    const right = new THREE.Vector3().crossVectors(baseDir, this.camera.up).normalize();
+    const up2 = new THREE.Vector3().crossVectors(right, baseDir).normalize();
+    let tracerEnd = null;
+    for (let k = 0; k < def.pellets; k++) {
+      const dir = baseDir.clone();
+      if (def.spread > 0) {
+        dir.addScaledVector(right, (Math.random() - 0.5) * 2 * def.spread);
+        dir.addScaledVector(up2, (Math.random() - 0.5) * 2 * def.spread);
+        dir.normalize();
+      }
+      const hit = this.fireRay(origin, dir, def.dmg);
+      if (k === 0) tracerEnd = hit.end;
+    }
+    if (tracerEnd) this.showTracer(this.playerPos3(), tracerEnd);
+    // Out of ammo: lose the weapon, fall back to another owned one.
+    if (this.weaponAmmoOf(name) <= 0) {
+      if (name === 'pistol') this.hasPistol = false;
+      else if (name === 'smg') this.hasSmg = false;
+      else this.hasShotgun = false;
+      const next = ['pistol', 'smg', 'shotgun'].find((w) => this.weaponOwned(w) && this.weaponAmmoOf(w) > 0);
+      if (next) {
+        this.currentWeapon = next;
+        this.hud.setWeapon(this.weaponLabel());
+      } else {
+        setTimeout(() => this.hud.setWeapon(''), 400);
+      }
+    } else {
+      this.hud.setWeapon(this.weaponLabel());
+    }
+  }
+
+  // One hitscan ray: returns the end point; applies damage to the first
+  // ped / cop it meets (buildings block the shot).
+  fireRay(origin, dir, dmg) {
     let bestT = 120, bestHit = null, bestKind = null;
     const test = (x, z, radius, obj, kind) => {
       const dx = x - origin.x, dz = z - origin.z;
@@ -464,9 +730,7 @@ export class Game {
       const t = rayAABB2D(origin, dir, c);
       if (t !== null && t < bestT) { bestT = t; bestHit = null; bestKind = 'wall'; }
     }
-    // Tracer line from the muzzle to the hit point.
     const end = origin.clone().add(dir.clone().multiplyScalar(bestT));
-    this.showTracer(this.playerPos3(), end);
     if (bestKind === 'ped') {
       bestHit.alive = false;
       bestHit.downTimer = 8;
@@ -474,7 +738,7 @@ export class Game {
       bestHit.mesh.position.y = 0.4;
       this.addWanted(1, 'Gunshot! Witnesses called the cops.');
     } else if (bestKind === 'cop') {
-      bestHit.hp -= 50;
+      bestHit.hp -= dmg;
       this.audio.hit();
       if (bestHit.hp <= 0) {
         bestHit.alive = false;
@@ -483,6 +747,7 @@ export class Game {
         this.addWanted(1, 'You dropped a cop!');
       }
     }
+    return { end, bestKind, bestHit };
   }
 
   playerPos3() {
@@ -629,6 +894,7 @@ export class Game {
         car.crashCooldown = 1;
         this.audio.crash();
         this.damagePlayer(4, 'crash');
+        this.damageCar(car, 2);
         this.checkCopRam(car);
       }
       this.audio.setEngine(Math.abs(car.speed) / 34, true);
@@ -691,6 +957,7 @@ export class Game {
             this.addWanted(1, 'You hit a cop car!');
           }
           this.damagePlayer(5, 'ram');
+          this.damageCar(p.inCar, 5);
           p.inCar.speed *= 0.6;
           this.audio.crash();
         } else {
@@ -728,6 +995,11 @@ export class Game {
 
     // Missions.
     this.missions.tick(dt, this);
+    this.updateVault(dt);
+    this.updateSmgPickup(dt);
+    this.updateCarCondition(dt);
+    this.shootCooldown = Math.max(0, this.shootCooldown - dt);
+    this.updateHeli(dt);
     const obj = this.missions.objectiveText(this);
     this.hud.setMission(obj.title, obj.text, obj.dist);
 
@@ -748,6 +1020,11 @@ export class Game {
 
   updateRobbery(dt) {
     const p = this.player;
+    // Mission 7 owns the vault storefront: while the player is cracking it,
+    // the ordinary robbery must not fire on the same shop.
+    if (this.missions.active && this.missions.active.def.id === 7 && this.missions.active.step === 0) {
+      this.robHold = 0; this.robTarget = null; return;
+    }
     // Robbery uses the E key held down (eHeld is set in bindInput).
     if (p.inCar || this.state !== 'playing') { this.robHold = 0; this.robTarget = null; return; }
     if (!this.eHeld) { this.robHold = 0; this.robTarget = null; return; }
@@ -768,6 +1045,75 @@ export class Game {
       if (this.missions.active && this.missions.active.def.id === 6) {
         this.missions.robbed++;
       }
+    }
+  }
+
+  // The Marina Vault (mission 7, step 0): hold E at the vault door for 4 s.
+  // Cracking it raises the heat to 3 stars (the heli arrives for the
+  // finale escape) and sends the player home to the safehouse. The vault
+  // pays nothing itself — complete() pays the $1,600 reward.
+  updateVault(dt) {
+    if (!this.missions.active || this.missions.active.def.id !== 7 || this.missions.active.step !== 0) return;
+    const a = this.missions.active;
+    const d = dist2D(this.player.x, this.player.z, a.target.x, a.target.z);
+    if (this.eHeld && !this.player.inCar && d < 3) {
+      a.vaultHold = (a.vaultHold || 0) + dt;
+      if (a.vaultHold >= 4) {
+        a.step = 1;
+        a.target = { x: this.city.safehouseTarget.x, z: this.city.safehouseTarget.z };
+        this.setWanted(3);
+        this.toast('The vault is open — grab the cash and run!', 'good');
+      }
+    } else {
+      a.vaultHold = 0;
+    }
+  }
+
+  // SMG pickup: walk over it to grab it (auto-switches to the SMG); it
+  // respawns 60 s after being taken.
+  updateSmgPickup(dt) {
+    const s = this.smgSpot;
+    if (s.taken) {
+      s.respawn -= dt;
+      if (s.respawn <= 0) {
+        s.taken = false;
+        this.smgMesh.visible = true;
+      }
+      return;
+    }
+    if (!this.player.inCar && dist2D(this.player.x, this.player.z, s.x, s.z) < 1.6) {
+      s.taken = true;
+      s.respawn = 60;
+      this.smgMesh.visible = false;
+      this.hasSmg = true;
+      this.smgAmmo = this.weaponDefs.smg.mag;
+      this.currentWeapon = 'smg';
+      this.hud.setWeapon(this.weaponLabel());
+      this.toast('SMG picked up — 32 rounds. Press 1/2/3 to switch.', 'good');
+    }
+  }
+
+  // Vehicle condition: recovers slowly after 10 s without damage; the HUD
+  // bar shows it; the smoke puff shows when it is low. (Damage itself is
+  // applied at the crash / ram sites via damageCar.)
+  updateCarCondition(dt) {
+    const car = this.player.inCar || null;
+    if (car && car.condition != null) {
+      car.condCleanT = (car.condCleanT || 0) + dt;
+      if (car.condCleanT > 10 && car.condition < 100 && !car.stalled) {
+        car.condition = Math.min(100, car.condition + 1.2 * dt);
+      }
+      this.hud.setCondition(car.condition, true);
+      if (car.condition < 30) {
+        this.smokeMesh.position.set(car.x, 2.2, car.z);
+        this.smokeMesh.material.opacity = 0.35 + Math.sin(this.time * 6) * 0.15;
+        this.smokeMesh.scale.setScalar(1 + Math.sin(this.time * 3) * 0.2);
+      } else {
+        this.smokeMesh.material.opacity = 0;
+      }
+    } else {
+      this.hud.setCondition(100, false);
+      this.smokeMesh.material.opacity = 0;
     }
   }
 
@@ -833,8 +1179,16 @@ export class Game {
     const p = this.player;
     // While the pistol is out, ease the camera flatter so distant targets
     // are hittable through the crosshair.
-    const pitchTarget = this.hasPistol && !p.inCar ? 0.22 : this.camPitch;
-    const pitch = lerp(this.camPitch, pitchTarget, dt * 3);
+    let pitchTarget = this.hasAnyWeapon() && !p.inCar ? 0.22 : this.camPitch;
+    // While the heli is up, tilt the camera flatter still so its body is
+    // actually in frame (at the default pitch it sits above the frame top).
+    // Eases back to the player's pitch when the heli leaves.
+    if (this.heli) pitchTarget = Math.min(pitchTarget, 0.12);
+    // Ease the live pitch from its previous value: lerping from camPitch
+    // every frame re-starts the ease and never converges.
+    if (this.camPitchLive === undefined) this.camPitchLive = this.camPitch;
+    this.camPitchLive = lerp(this.camPitchLive, pitchTarget, Math.min(1, dt * 3));
+    const pitch = this.camPitchLive;
     const dist = p.inCar ? this.camDist + 3 : this.camDist;
     const cx = p.x + Math.sin(this.camYaw) * Math.cos(pitch) * dist;
     const cz = p.z + Math.cos(this.camYaw) * Math.cos(pitch) * dist;
@@ -861,18 +1215,24 @@ export class Game {
   }
 
   updateMinimap() {
-    this.hud.drawMinimap({
+    // The same state feeds the minimap and the full-screen map (via
+    // lastMapState), so both always agree.
+    this.lastMapState = {
       roads: this.city.roadCoords,
       safehouse: this.city.safehouse,
+      garage: this.city.garage,
       pickups: this.city.pickupSpots,
+      smgPickup: this.smgSpot,
       peds: this.peds,
       traffic: this.traffic,
       police: this.policeCars,
+      heli: this.heli ? { x: this.heli.position.x, z: this.heli.position.z } : null,
       courier: this.courier,
       marker: this.missions.markerPos() || (this.missions.active && this.missions.active.def.id === 4 && this.courier
         ? { x: this.courier.x, z: this.courier.z } : null),
       player: { x: this.player.x, z: this.player.z, heading: this.player.heading },
-    });
+    };
+    this.hud.drawMinimap(this.lastMapState);
   }
 
   updateClockHud() {
@@ -894,7 +1254,7 @@ export class Game {
     this.hud.setHealth(this.player.hp);
     this.hud.setMoney(this.money);
     this.hud.setWanted(this.wanted);
-    this.hud.setWeapon(this.hasPistol ? `PISTOL ${this.pistolAmmo}` : '');
+    this.hud.setWeapon(this.weaponLabel());
     const obj = this.missions.objectiveText(this);
     this.hud.setMission(obj.title, obj.text, obj.dist);
   }
@@ -915,6 +1275,15 @@ export class Game {
         this.update(dt);
       } catch (e) {
         this.errors.push(String(e && e.message ? e.message : e));
+      }
+      // Menu scene: a slow orbit around the city so the title sits over a
+      // living skyline. update() is a no-op in the menu state, so this
+      // lives here; updateCamera takes over on the first playing frame.
+      if (this.state === 'menu') {
+        this.menuOrbit += dt * 0.12;
+        const r = 150, h = 75;
+        this.camera.position.set(Math.cos(this.menuOrbit) * r, h, Math.sin(this.menuOrbit) * r);
+        this.camera.lookAt(0, 0, 0);
       }
       this.renderer.render(this.scene, this.camera);
     };

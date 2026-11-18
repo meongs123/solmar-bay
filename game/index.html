@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="SOLMAR BAY — an original open-world crime game: play as Rook, steal cars, outrun the bay police, run six story missions in a living bay city with 48 pedestrians on the sidewalks.">
+<meta name="description" content="SOLMAR BAY — an original open-world crime game: play as Rook, steal cars, outrun the bay police, run seven story missions in a living bay city with 48 pedestrians on the sidewalks.">
 <title>SOLMAR BAY — an open-world crime game</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230fa38e'/%3E%3Ctext x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'%3ES%3C/text%3E%3C/svg%3E">
 <style>
@@ -98,21 +98,33 @@
   <div id="speed-wrap" class="panel"><div id="speed">0</div><div class="unit">KM/H</div></div>
   <div id="weapon" class="panel"></div>
   <canvas id="minimap" width="300" height="300"></canvas>
-  <div id="controls-hint" class="panel">WASD move / drive · E enter car · F punch · Click shoot (pistol) · Space jump / handbrake · Shift sprint · N next mission · T jump to night · P pause · M mute · drag mouse to look</div>
+  <div id="controls-hint" class="panel">WASD move / drive · E enter car · F punch · Click shoot · Space jump / handbrake · Shift sprint · N next mission · T jump to night · P pause · M map · U mute · drag mouse to look</div>
   <div id="toasts"></div>
   <div id="crosshair"></div>
 </div>
 <div id="vignette"></div>
 
 <div id="menu" class="screen">
+  <svg width="110" height="110" viewBox="0 0 110 110" aria-label="Rook" style="margin-bottom:6px">
+    <circle cx="55" cy="55" r="52" fill="#0e2a26"/>
+    <circle cx="55" cy="55" r="52" fill="none" stroke="#14d8b8" stroke-width="3"/>
+    <path d="M22 108 L30 78 Q55 66 80 78 L88 108 Z" fill="#0fa38e"/>
+    <path d="M55 66 L55 108" stroke="#0a5c4e" stroke-width="3"/>
+    <circle cx="55" cy="46" r="21" fill="#e8b98a"/>
+    <path d="M34 44 Q36 24 55 24 Q74 24 76 44 Q66 34 55 34 Q44 34 34 44 Z" fill="#14d8b8"/>
+    <rect x="30" y="40" width="12" height="5" rx="2" fill="#14d8b8"/>
+    <circle cx="47" cy="47" r="2.4" fill="#1a1a1a"/>
+    <circle cx="63" cy="47" r="2.4" fill="#1a1a1a"/>
+    <path d="M48 58 Q55 63 62 58" stroke="#1a1a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </svg>
   <h1>SOLMAR BAY</h1>
-  <p class="sub">A bay city by day, a neon jungle after dark. Play as Rook — teal jacket, backwards cap, quick feet. Steal cars, outrun the bay police, run six jobs for Rook and Mara — and take the city for yourself. An original open-world crime game. Nothing here belongs to any other game.</p>
-  <p class="keys"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>Space</b> jump (on foot) / handbrake (driving) &nbsp;·&nbsp; <b>N</b> next mission &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute<br>Hold <b>E</b> at a shopfront to rob it. Pick up the pistol on the green dots. Save from the pause menu.<br>48 pedestrians walk the sidewalks in groups — the amber dots on the minimap.</p>
+  <p class="sub">A bay city by day, a neon jungle after dark. Play as Rook — teal jacket, backwards cap, quick feet. Steal cars, outrun the bay police, run seven jobs for Rook and Mara — and take the city for yourself. An original open-world crime game. Nothing here belongs to any other game.</p>
+  <p class="keys"><b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter &amp; steal cars &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>Click</b> shoot &nbsp;·&nbsp; <b>Space</b> jump (on foot) / handbrake (driving) &nbsp;·&nbsp; <b>N</b> next mission &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> map &nbsp;·&nbsp; <b>U</b> mute<br>Hold <b>E</b> at a shopfront to rob it. Pick up the pistol on the green dots, the SMG on the amber one. Save from the pause menu.<br>48 pedestrians walk the sidewalks in groups — the amber dots on the minimap.</p>
   <div>
     <button id="btn-start">▶ START</button>
     <button id="btn-continue" class="ghost" style="display:none">CONTINUE (SAVE)</button>
   </div>
-  <div class="badge-row">PLAYS OFFLINE · KEYBOARD + MOUSE · 6 MISSIONS · WANTED 0–5 STARS</div>
+  <div class="badge-row">PLAYS OFFLINE · KEYBOARD + MOUSE · 7 MISSIONS · WANTED 0–5 STARS</div>
 </div>
 
 <div id="pause" class="screen">
@@ -139,7 +151,7 @@
 
 <div id="complete" class="screen">
   <h2>SOLMAR BAY IS YOURS</h2>
-  <p class="sub">All six jobs done. Rook and Mara are rich, the harbour ledger is yours, and the bay police have learned your name. You earned <b id="complete-money">$0</b>.</p>
+  <p class="sub">All seven jobs done. Rook and Mara are rich, the harbour ledger is yours, and the bay police have learned your name. You earned <b id="complete-money">$0</b>.</p>
   <div>
     <button id="btn-free-roam">KEEP PLAYING (FREE ROAM)</button>
     <button id="btn-quit-menu" class="ghost">MAIN MENU</button>
