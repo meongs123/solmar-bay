@@ -9,35 +9,53 @@ import { PITCH } from './city.js';
 const MISSION_DEFS = [
   {
     id: 1, title: 'First Wheels', reward: 150,
-    brief: 'Rook needs wheels. Take any car on the street and bring it to the garage.',
-    start: 'Steal a car — press E next to one.',
+    brief: 'Rook needs wheels, and the street is a showroom. Take any car and bring it to the garage — before its owner notices.',
+    start: 'Steal a car — press E next to one. Any car. Yours now.',
   },
   {
     id: 2, title: 'Delivery Run', reward: 250,
-    brief: 'Mara has packages that cannot wait. Two drops, 100 seconds. Drive like it matters.',
-    start: 'Drive to the first drop-off.',
+    brief: 'Mara has two packages that cannot wait — a hundred seconds on the clock. Drive like the bay is watching, because it is.',
+    start: 'Drive to the first drop-off. Fast, not reckless.',
   },
   {
     id: 3, title: 'Getaway', reward: 300,
-    brief: 'The bay police are on you. Lose them — or outlast them — and meet Rook at the safehouse.',
-    start: 'Lose the cops. Stay out of sight until the heat dies.',
+    brief: 'The bay police are on you, and they do not forgive. Lose them or outlast them — then meet Rook at the safehouse.',
+    start: 'Lose the cops. Stay out of sight until the heat dies down.',
   },
   {
     id: 4, title: 'Tail the Courier', reward: 350,
-    brief: 'A courier carries the harbour ledger. Follow him — close enough to see, far enough to stay invisible.',
+    brief: 'A courier carries the harbour ledger — every name in the bay, on paper. Follow him: close enough to see, far enough to stay invisible.',
     start: 'Follow the courier. Not too close, not too far.',
   },
   {
     id: 5, title: 'Pickup', reward: 400,
-    brief: 'A package waits at the old pier market. Pick it up on foot and bring it home.',
+    brief: 'A package waits at the old pier market, and the pier does not like cars. Pick it up on foot and bring it home.',
     start: 'Walk to the pickup point — the package is collected on arrival.',
   },
   {
     id: 6, title: 'The Big Score', reward: 1400,
-    brief: 'Two shops, one night, no alarms. Rob both stores, then vanish to the safehouse.',
+    brief: 'Two shops, one night, no alarms — the score that makes Rook and Mara rich. Rob both stores, then vanish to the safehouse.',
     start: 'Rob two stores — hold E at a shopfront.',
   },
 ];
+
+// Dialogue lines for the HUD dialogue card (hud.dialogue). Rook speaks in
+// teal, Mara in amber. Non-blocking: the card is a timed overlay, the
+// mission toasts still fire alongside it.
+const DIALOGUE = {
+  1: { speaker: 'ROOK', color: '#14d8b8', start: 'Wheels first. Any car on the street — take it, bring it to the garage.', complete: 'Clean steal. You are a natural, kid.', fail: null },
+  2: { speaker: 'MARA', color: '#ffc46a', start: 'Two drops, a hundred seconds. Do not dawdle.', complete: 'Packages delivered. The clients are happy.', fail: 'Too slow. The packages went elsewhere.' },
+  3: { speaker: 'ROOK', color: '#14d8b8', start: "Heat is on you. Vanish — or outlast them.", complete: 'They lost you. That is how it is done.', fail: null },
+  4: { speaker: 'MARA', color: '#ffc46a', start: 'Follow the courier. Close enough to see him, far enough to stay invisible.', complete: 'Ledger is ours. He never knew you were there.', fail: 'You lost him. The ledger stays with the harbour.' },
+  5: { speaker: 'ROOK', color: '#14d8b8', start: 'Package waits at the old pier market. On foot — no wheels for this one.', complete: 'Package secured. Bring it home.', fail: null },
+  6: { speaker: 'MARA', color: '#ffc46a', start: 'Two shops, one night, no alarms. Then vanish.', complete: 'The big score. We are rich, Rook.', fail: null },
+};
+
+function speak(G, id, kind) {
+  const d = DIALOGUE[id];
+  if (!d || !d[kind]) return;
+  if (G.hud && G.hud.dialogue) G.hud.dialogue(d.speaker, d[kind], d.color);
+}
 
 export function createMissions(scene, city) {
   const markerMat = new THREE.MeshBasicMaterial({ color: 0xffc46a, transparent: true, opacity: 0.85 });
@@ -108,6 +126,8 @@ export function createMissions(scene, city) {
       }
       M.active = a;
       G.toast(`${def.title} — ${def.start}`, 'mission');
+      speak(G, def.id, 'start');
+      if (G.hud && G.hud.setRespect) G.hud.setRespect(M.completed);
       G.audioJingle('mission');
       M.updateMarker();
       return true;
@@ -131,6 +151,8 @@ export function createMissions(scene, city) {
       M.completed++;
       M.index++;
       G.toast(`${a.def.title} complete — +$${reward}`, 'good');
+      speak(G, a.def.id, 'complete');
+      if (G.hud && G.hud.setRespect) G.hud.setRespect(M.completed);
       G.audioJingle('complete');
       M.active = null;
       G.stealthTail = false;
@@ -146,6 +168,7 @@ export function createMissions(scene, city) {
       const a = M.active;
       if (!a) return;
       G.toast(`${a.def.title} failed — ${reason}. Press N to retry.`, 'bad');
+      speak(G, a.def.id, 'fail');
       G.audioJingle('fail');
       M.active = null;
       G.stealthTail = false;
@@ -240,11 +263,13 @@ export function createMissions(scene, city) {
     },
 
     // Objective line for the HUD, plus the live distance to the marker.
+    // Title carries the stage (Job X of 6); text carries the NEXT step.
     objectiveText(G) {
       const a = M.active;
       if (!a) {
         if (M.isStoryDone()) return { title: 'Free roam', text: 'SOLMAR BAY IS YOURS — explore, earn, survive.', dist: null };
-        return { title: MISSION_DEFS[M.index].title, text: 'Press N to start the next mission.', dist: null };
+        const next = MISSION_DEFS[M.index];
+        return { title: `${next.title} — Job ${M.index + 1}/6`, text: `NEXT: ${next.start}`, dist: null };
       }
       const p = G.playerPos();
       let t = a.target;
@@ -255,7 +280,14 @@ export function createMissions(scene, city) {
       if (a.def.id === 3) text = `Lose the cops — ${Math.max(0, Math.ceil(a.timer))}s left (or reach 0 stars)`;
       if (a.def.id === 4) text = `Tail progress: ${Math.min(100, Math.round((a.progress / 25) * 100))}% — stay 8–32m back`;
       if (a.def.id === 6) text = `Stores robbed: ${M.robbed}/2${M.robbed >= 2 ? ' — get to the safehouse!' : ' — hold E at a shopfront'}`;
-      return { title: a.def.title, text, dist };
+      let next = '';
+      if (a.def.id === 1) next = a.step === 0 ? 'Steal a car' : 'Drive to the garage';
+      else if (a.def.id === 2) next = `Drop ${a.dropIdx + 1} of 2`;
+      else if (a.def.id === 3) next = 'Reach 0 stars';
+      else if (a.def.id === 4) next = 'Stay 8–32m back';
+      else if (a.def.id === 5) next = a.step === 0 ? 'Reach the pickup' : 'Return to the safehouse';
+      else if (a.def.id === 6) next = M.robbed >= 2 ? 'Get to the safehouse' : 'Rob a store';
+      return { title: `${a.def.title} — Job ${a.def.id}/6`, text: `NEXT: ${next} · ${text}`, dist };
     },
   };
   return M;

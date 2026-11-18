@@ -125,12 +125,16 @@ export function createAudio() {
     },
     startMusic() {
       if (musicTimer || !ctx) return;
-      // A lazy two-bar bass line, one note a second.
-      const line = [55, 55, 65.4, 49, 55, 55, 73.4, 65.4];
+      // A lazy two-bar bass line, one note a second, with a sparse lead
+      // answering on some beats — the bay's only radio station.
+      const line = [55, 55, 65.4, 49, 55, 55, 73.4, 65.4, 55, 55, 65.4, 49, 82.4, 73.4, 65.4, 49];
+      const lead = [0, 0, 0, 440, 0, 0, 523, 0, 0, 0, 0, 659, 0, 0, 587, 0];
       let i = 0;
       musicTimer = setInterval(() => {
         if (muted || !ctx) return;
         blip(line[i % line.length], 0.5, 'triangle', 0.05);
+        const l = lead[i % lead.length];
+        if (l) blip(l, 0.35, 'sine', 0.03);
         i++;
       }, 1000);
     },

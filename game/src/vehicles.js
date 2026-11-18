@@ -2,8 +2,28 @@
 // driving physics, traffic that follows the road grid and turns at
 // intersections, and police cars that patrol, chase and ram.
 import * as THREE from 'three';
-import { makeRng, clamp, lerp, wrapAngle, dist2D, approach } from './util.js';
+import { makeRng, clamp, lerp, wrapAngle, dist2D, approach, canvasTexture } from './util.js';
 import { PITCH, ROAD_HALF, CITY_EDGE } from './city.js';
+
+// Shared radial glow texture for headlight/taillight halos.
+const glowTexture = canvasTexture(64, 64, (g) => {
+  const grad = g.createRadialGradient(32, 32, 1, 32, 32, 31);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.4)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+});
+
+// Night-driven car lights, updated by the game once per frame.
+// {mat, base} sprite/beam opacities; {mat, day, night} light emissives.
+const nightGlow = [];
+const nightBeam = [];
+const nightLamp = [];
+export function updateCarNight(nightF) {
+  for (const e of nightGlow) e.mat.opacity = nightF * e.base;
+  for (const e of nightBeam) e.mat.opacity = nightF * e.base;
+  for (const e of nightLamp) e.mat.emissiveIntensity = lerp(e.day, e.night, nightF);
+}
 
 const CAR_COLORS = [
   0xc23b2e, 0x2e6fc2, 0xd8a83c, 0x3fae6a, 0x7a4fc2, 0xd8d8d8,
@@ -68,8 +88,9 @@ export function makeCarMesh(type, color, isPolice = false) {
     g.add(plate);
   }
   // Emissive headlights (front) and taillights (rear).
-  const headMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff2c0, emissiveIntensity: 1.6 });
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff2a22, emissiveIntensity: 1.4 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff2c0, emissiveIntensity: 0.7 });
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff2a22, emissiveIntensity: 0.6 });
+  nightLamp.push({ mat: headMat, day: 0.7, night: 2.6 }, { mat: tailMat, day: 0.6, night: 2.2 });
   for (const s of [-1, 1]) {
     const h = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.24, 0.42), headMat);
     h.position.set(len / 2 + 0.5, 0.85, s * (wid / 2 - 0.45));
@@ -78,6 +99,29 @@ export function makeCarMesh(type, color, isPolice = false) {
     t.position.set(-len / 2 - 0.5, 0.85, s * (wid / 2 - 0.45));
     g.add(t);
   }
+  // Headlight halos + a light cone on the road ahead, and taillight halos.
+  // Opacity is driven by updateCarNight(nightF) from game.js.
+  for (const s of [-1, 1]) {
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xfff2c0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.scale.set(2.4, 2.4, 1);
+    halo.position.set(len / 2 + 0.55, 0.85, s * (wid / 2 - 0.45));
+    g.add(halo);
+    nightGlow.push({ mat: halo.material, base: 0.85 });
+    const tail = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xff2a22, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    tail.scale.set(1.5, 1.5, 1);
+    tail.position.set(-len / 2 - 0.55, 0.85, s * (wid / 2 - 0.45));
+    g.add(tail);
+    nightGlow.push({ mat: tail.material, base: 0.7 });
+  }
+  // Beam cone: apex at the headlights, widening 12 m down the road.
+  // ConeGeometry's apex is +Y; rotation.z = +90° maps +Y to -X, so with the
+  // cone centred at len/2 + 6 the apex sits at the car's nose.
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.4, 12, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  beam.rotation.z = Math.PI / 2 - 0.1;
+  beam.position.set(len / 2 + 6, 1.0, 0);
+  g.add(beam);
+  nightBeam.push({ mat: beam.material, base: 0.06 });
   if (isPolice) {
     // Light bar + POLICE door stripe.
     const bar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.22, 1.1),

@@ -19,8 +19,11 @@ const ROOF_COLORS = [0x4a4642, 0x55504a, 0x3f3d3a, 0x5a5248];
 const SHOP_NAMES = [
   'ROOKS', 'MARAS', 'NOODLE BAR', 'TACO JOINT', 'BAY 24', 'SOLMAR DELI',
   'PIER 9', 'LAUNDRY', 'DONUT STOP', 'FISH & CO', 'BAR NEON', 'GYM IRON',
+  'NEON MOTEL', 'CYBER CAFE', 'RAMEN 24', 'VINYL', 'ARCADE', 'BODEGA',
+  'SUSHI GO', 'PIZZA NOVA', 'HOTEL LUNA', 'CLUB VOLT', 'TACOS EL SOL', 'KARAOKE',
 ];
 const SHOP_COLORS = [0xd94f3d, 0x3d9ad9, 0xe0a83c, 0x4fc46a, 0xc65fd9, 0x3dc4c0];
+const NEON_COLORS = [0xff5fd0, 0x35e0ff, 0x9d6bff, 0x52ff9e, 0xffb020, 0xff3d5a];
 
 function facadeTexture(rng, base, variant) {
   return canvasTexture(128, 256, (g, w, h) => {
@@ -52,8 +55,10 @@ function facadeTexture(rng, base, variant) {
         const ww = cw * 0.64, wh = ch * 0.55;
         g.fillStyle = '#20242a';
         g.fillRect(x - 2, y - 2, ww + 4, wh + 4); // dark frame
-        const lit = rng.chance(0.28);
-        g.fillStyle = lit ? (rng.chance(0.6) ? '#ffd98a' : '#9fd8ff') : '#2c3540';
+        const lit = rng.chance(0.5);
+        g.fillStyle = lit
+          ? (rng.chance(0.55) ? '#ffd98a' : rng.chance(0.7) ? '#9fd8ff' : rng.chance(0.5) ? '#ff9de2' : '#7df9ff')
+          : '#2c3540';
         g.fillRect(x, y, ww, wh);
         g.fillStyle = 'rgba(0,0,0,0.35)';
         g.fillRect(x + ww / 2 - 1, y, 2, wh); // mullion
@@ -113,18 +118,38 @@ function groundTexture(rng) {
 }
 
 function signTexture(name, color) {
+  const hex = '#' + color.toString(16).padStart(6, '0');
   return canvasTexture(256, 64, (g, w, h) => {
-    g.fillStyle = '#14161a';
+    g.fillStyle = '#0b0d12';
     g.fillRect(0, 0, w, h);
-    g.strokeStyle = '#' + color.toString(16).padStart(6, '0');
+    // Neon tube: a blurred glow pass, then a crisp pass, then a white-hot
+    // core so the sign reads as a lit tube rather than a painted board.
+    g.shadowColor = hex;
+    g.shadowBlur = 16;
+    g.strokeStyle = hex;
     g.lineWidth = 4;
-    g.strokeRect(3, 3, w - 6, h - 6);
-    g.fillStyle = '#' + color.toString(16).padStart(6, '0');
+    g.strokeRect(4, 4, w - 8, h - 8);
+    g.fillStyle = hex;
     g.font = 'bold 30px sans-serif';
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(name, w / 2, h / 2 + 1);
+    g.fillText(name, w / 2, h / 2 + 1);
+    g.shadowBlur = 0;
+    g.fillStyle = '#ffffff';
+    g.fillText(name, w / 2, h / 2 + 1);
   });
 }
+
+// Soft radial glow sprite texture, shared by lamp halos, neon halos and
+// headlights. One canvas, reused everywhere.
+const glowTexture = canvasTexture(128, 128, (g, w, h) => {
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, w, h);
+});
 
 export function buildCity(scene, seed = 1337) {
   const rng = makeRng(seed);
@@ -138,6 +163,9 @@ export function buildCity(scene, seed = 1337) {
     safehouseTarget: { x: 0, z: 0 },
     garageTarget: { x: 0, z: 0 },
     windowMats: [],          // emissive materials lit at night
+    lampGlows: [],          // {mat, base} lamp pools + halos, faded in at night
+    neonHalos: [],          // {mat, base} neon sign halos, faded in at night
+    nightSky: null,         // {starMat, moonMat, moonGlowMat} set by buildCity
     trafficLights: [],       // {group, mats:[r,y,g], phase}
     spawn: { x: 0, z: 40 },
   };
@@ -248,6 +276,15 @@ export function buildCity(scene, seed = 1337) {
       tip.position.set(w * 0.3, hgt + 7, -d * 0.25);
       group.add(ant, tip);
     }
+    // Neon edge strip: a glowing vertical tube on one front corner so the
+    // skyline reads at night. MeshBasicMaterial is unlit — always bright.
+    if (rng.chance(0.5)) {
+      const neon = NEON_COLORS[rng.int(0, NEON_COLORS.length - 1)];
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.22, hgt * 0.72, 0.22),
+        new THREE.MeshBasicMaterial({ color: neon }));
+      strip.position.set((rng.chance(0.5) ? 1 : -1) * (w / 2 - 0.12), hgt * 0.36 + 0.3, d / 2 + 0.12);
+      group.add(strip);
+    }
     group.position.set(x, 0, z);
     scene.add(group);
     city.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
@@ -262,9 +299,11 @@ export function buildCity(scene, seed = 1337) {
     front.position.y = 2.5;
     g.add(front);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 2.6, 0.3),
-      new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.1, metalness: 0.7, emissive: 0x224455, emissiveIntensity: 0.4 }));
+      new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.1, metalness: 0.7, emissive: 0xffc98a, emissiveIntensity: 0.4 }));
     glass.position.set(0, 2.2, 0.7);
     g.add(glass);
+    // The shop window glows with the rest of the city at night.
+    city.windowMats.push(glass.material);
     const awning = new THREE.Mesh(new THREE.BoxGeometry(w + 1, 0.25, 2.6),
       new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
     awning.position.set(0, 4.9, 1.1);
@@ -276,6 +315,20 @@ export function buildCity(scene, seed = 1337) {
       }));
     sign.position.set(0, 6.4, 0.75);
     g.add(sign);
+    // Neon tube under the sign (unlit material: always full colour) plus
+    // a soft halo sprite that fades in at night.
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.16, 0.16),
+      new THREE.MeshBasicMaterial({ color }));
+    tube.position.set(0, 7.8, 0.75);
+    g.add(tube);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture, color, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    halo.scale.set(w * 1.7, 5, 1);
+    halo.position.set(0, 6.4, 1.4);
+    g.add(halo);
+    city.neonHalos.push({ mat: halo.material, base: 0.55 });
     city.windowMats.push(sign.material);
     g.position.set(x, 0.3, z);
     g.rotation.y = facing;
@@ -377,6 +430,18 @@ export function buildCity(scene, seed = 1337) {
       lamp.add(pole, arm, head);
       lamp.position.set(x + ROAD_HALF + 1.5, 0, z + ROAD_HALF + 1.5);
       scene.add(lamp);
+      // Warm light pool on the road under the lamp + a soft halo at the
+      // head. Both fade in at night (city.lampGlows, driven by game.js).
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(7, 20),
+        new THREE.MeshBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(x + ROAD_HALF + 1.5 + 2.4, 0.12, z + ROAD_HALF + 1.5);
+      scene.add(pool);
+      const lampHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xffe9b0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      lampHalo.scale.set(8, 8, 1);
+      lampHalo.position.set(x + ROAD_HALF + 1.5 + 2.4, 6.8, z + ROAD_HALF + 1.5);
+      scene.add(lampHalo);
+      city.lampGlows.push({ mat: pool.material, base: 0.22 }, { mat: lampHalo.material, base: 0.65 });
       // Traffic light at the four central intersections.
       if (Math.abs(bx) <= 1 && Math.abs(bz) <= 1) {
         const tl = new THREE.Group();
@@ -440,8 +505,11 @@ export function buildCity(scene, seed = 1337) {
     scene.add(hyd);
   }
 
-  // Distant skyline ring so the horizon is never empty.
-  const skyMat = new THREE.MeshStandardMaterial({ color: 0x5a6a7a, roughness: 1 });
+  // Distant skyline ring so the horizon is never empty. Towers reuse a
+  // facade texture as their emissive map, so their windows light up at
+  // night like the rest of the city.
+  const skyMat = new THREE.MeshStandardMaterial({ color: 0x5a6a7a, roughness: 1, emissive: 0xffffff, emissiveMap: facadeMats[2].map, emissiveIntensity: 0 });
+  city.windowMats.push(skyMat);
   for (let i = 0; i < 26; i++) {
     const a = (i / 26) * Math.PI * 2 + rng.range(-0.1, 0.1);
     const r = CITY_EDGE + rng.range(60, 160);
@@ -450,6 +518,32 @@ export function buildCity(scene, seed = 1337) {
     tower.position.set(Math.cos(a) * r, hgt / 2, Math.sin(a) * r);
     scene.add(tower);
   }
+
+  // Night sky: a dome of stars and a moon with a halo, all faded in by
+  // updateDayNight (city.nightSky). Fog is off for these — they sit far
+  // beyond the fog range and must stay visible.
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = [];
+  for (let i = 0; i < 700; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    const el = rng.range(0.08, Math.PI / 2);
+    const r = 950;
+    starPos.push(Math.cos(a) * Math.cos(el) * r, Math.sin(el) * r, Math.sin(a) * Math.cos(el) * r);
+  }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.4, sizeAttenuation: false, transparent: true, opacity: 0, fog: false });
+  scene.add(new THREE.Points(starGeo, starMat));
+  const moonGroup = new THREE.Group();
+  const moonMat = new THREE.MeshBasicMaterial({ color: 0xf4f1de, transparent: true, opacity: 0, fog: false });
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(24, 24), moonMat);
+  const moonGlowMat = new THREE.SpriteMaterial({ map: glowTexture, color: 0xdfe8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const moonGlow = new THREE.Sprite(moonGlowMat);
+  moonGlow.scale.set(190, 190, 1);
+  moonGroup.add(moon, moonGlow);
+  moonGroup.position.set(-420, 380, -620);
+  moonGroup.lookAt(0, 0, 0);
+  scene.add(moonGroup);
+  city.nightSky = { starMat, moonMat, moonGlowMat };
 
   // Pistol pickups sit on two road shoulders, marked on the minimap.
   city.pickupSpots = [
@@ -460,15 +554,19 @@ export function buildCity(scene, seed = 1337) {
   return city;
 }
 
-// Day/night: returns 0 (midnight) .. 1 (noon) daylight factor for time t (seconds).
+// Day/night: returns 0.12 (midnight) .. 1 (noon) daylight factor for time t (seconds).
+// NOTE: the clamp must wrap the whole sine, not the raw sine — max(0, sin)
+// before the *0.5+0.5 step froze the night half of the cycle at 0.56, so
+// "night" was never darker than dusk. That was the flat-night bug.
 export function daylight(t) {
   const day = (t % 240) / 240; // 240 s full cycle
-  return lerp(0.12, 1, Math.max(0, Math.sin(day * Math.PI * 2 - Math.PI / 2)) * 0.5 + 0.5);
+  return lerp(0.12, 1, Math.sin(day * Math.PI * 2 - Math.PI / 2) * 0.5 + 0.5);
 }
 export function skyColors(nightF) {
   // nightF 0 = day, 1 = night. Returns [top, horizon, fog] hex colours.
+  // Night is near-black: the city lights have to carry the frame.
   const day = [0x6fb3e8, 0xbfd9ee, 0xcfe0ea];
-  const night = [0x0a1024, 0x1c2440, 0x141a2e];
+  const night = [0x01030a, 0x0a1024, 0x05070f];
   return day.map((c, i) => {
     const a = new THREE.Color(c), b = new THREE.Color(night[i]);
     return a.lerp(b, nightF).getHex();

@@ -8,6 +8,7 @@ import { buildCity, daylight, skyColors, PITCH, ROAD_HALF, CITY_EDGE } from './c
 import {
   makeCarMesh, Car, drivePlayerCar, updateTraffic, updatePoliceCar,
   spawnTrafficCars, spawnParkedCars, makePoliceCar, pointInColliders,
+  updateCarNight,
 } from './vehicles.js';
 import { Player, movePlayer, spawnPedestrians, updatePedestrian, FootCop, updateFootCop, tryJump, updateJump } from './people.js';
 import { createMissions } from './missions.js';
@@ -25,7 +26,8 @@ export class Game {
     this.rng = makeRng(1337);
     this.state = 'menu'; // menu | playing | paused | busted | wasted | complete
     this.time = 0;
-    this.dayTime = 90; // seconds into the 240 s day cycle; starts late morning
+    this.dayTime = 8; // seconds into the 240 s day cycle; the neon
+    // prototype opens at midnight — deep night, city lights on.
     this.money = 0;
     this.wanted = 0;
     this.wantedTimer = 0;      // time since the last crime
@@ -66,6 +68,12 @@ export class Game {
     this.scene.add(this.hemi);
     this.ambient = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(this.ambient);
+    // Player headlight: a real spotlight that only matters at night,
+    // aimed down the road ahead of the driven car.
+    this.headlight = new THREE.SpotLight(0xfff2c0, 0, 70, 0.55, 0.5, 0.9);
+    this.headlightTarget = new THREE.Object3D();
+    this.scene.add(this.headlight, this.headlightTarget);
+    this.headlight.target = this.headlightTarget;
 
     // World + actors.
     this.city = buildCity(this.scene, 1337);
@@ -206,6 +214,10 @@ export class Game {
       if (e.code === 'KeyM') {
         const m = this.audio.toggleMute();
         this.toast(m ? 'Sound muted.' : 'Sound on.', 'info');
+      }
+      if (e.code === 'KeyT') {
+        this.dayTime = 8;
+        this.toast('Midnight in Solmar Bay.', 'info');
       }
       if (e.code === 'KeyP' || e.code === 'Escape') this.togglePause();
       this.audio.unlock();
@@ -775,18 +787,45 @@ export class Game {
     const [top, horizon, fog] = skyColors(nightF);
     this.scene.background.setHex(top);
     this.scene.fog.color.setHex(fog);
-    // Sun swings across the sky with the cycle.
+    // Sun swings across the sky with the cycle; at night it is moonlight.
+    // Clamped above the horizon: a light below ground casts upward
+    // shadows that read as a dark diagonal band across the road.
     const ang = (this.dayTime / DAY_LENGTH) * Math.PI * 2 - Math.PI / 2;
-    this.sun.position.set(Math.cos(ang) * 180, Math.sin(ang) * 160 + 30, 80);
-    this.sun.intensity = lerp(0.15, 2.4, dl);
+    this.sun.position.set(Math.cos(ang) * 180, Math.max(60, Math.sin(ang) * 160 + 30), 80);
+    this.sun.intensity = lerp(0.35, 2.4, dl);
     this.sun.color.setHex(nightF > 0.7 ? 0x8aa0c8 : 0xfff2d8);
-    this.hemi.intensity = lerp(0.3, 1.0, dl);
-    this.ambient.intensity = lerp(0.4, 0.32, dl);
+    // Night is genuinely dark: ambient and sky fill drop hard so the
+    // windows, lamps and neon carry the frame instead of a flat wash.
+    this.hemi.intensity = lerp(0.12, 1.0, dl);
+    this.ambient.intensity = lerp(0.10, 0.32, dl);
     // Windows + lamps glow at night.
-    const glow = nightF * 0.9;
+    const glow = nightF * 1.15;
     for (const m of this.city.windowMats) {
       if (m.emissiveMap) m.emissiveIntensity = glow;
       else if (m.emissive) m.emissiveIntensity = glow * 1.4;
+    }
+    // Stars + moon fade in with the dark.
+    const sky = this.city.nightSky;
+    if (sky) {
+      sky.starMat.opacity = nightF * 0.9;
+      sky.moonMat.opacity = nightF;
+      sky.moonGlowMat.opacity = nightF * 0.55;
+    }
+    // Street-lamp pools and halos, neon sign halos.
+    for (const e of this.city.lampGlows) e.mat.opacity = nightF * e.base;
+    for (const e of this.city.neonHalos) e.mat.opacity = nightF * e.base;
+    // Car lights: halos, beams, emissive.
+    updateCarNight(nightF);
+    // Player headlight beam: a real spotlight ahead of the driven car.
+    const p = this.player;
+    if (p.inCar) {
+      const car = p.inCar;
+      const f = car.forward();
+      this.headlight.position.set(car.x + f.x * (car.len / 2), 1.2, car.z + f.z * (car.len / 2));
+      this.headlightTarget.position.set(car.x + f.x * 30, 0, car.z + f.z * 30);
+      this.headlight.intensity = nightF * 160;
+    } else {
+      this.headlight.intensity = 0;
     }
   }
 
@@ -838,11 +877,16 @@ export class Game {
 
   updateClockHud() {
     const dayFrac = this.dayTime / DAY_LENGTH;
-    const hour = Math.floor((dayFrac * 24 + 6) % 24);
-    const min = Math.floor(((dayFrac * 24 + 6) % 1) * 60);
+    // Clock follows the daylight curve: dayTime 0 is midnight (darkest),
+    // dayTime 120 is noon (brightest).
+    const hour = Math.floor(dayFrac * 24) % 24;
+    const min = Math.floor(((dayFrac * 24) % 1) * 60);
     const hh = String(hour).padStart(2, '0');
     const mm = String(min).padStart(2, '0');
-    const part = hour < 6 ? 'NIGHT' : hour < 18 ? 'DAY' : 'DUSK';
+    // The label follows the actual light, not the clock: the cycle's
+    // daylight curve and the clock drift apart near the edges.
+    const dl = daylight(this.dayTime);
+    const part = dl < 0.3 ? 'NIGHT' : dl < 0.65 ? 'DUSK' : 'DAY';
     this.hud.setClock(`${hh}:${mm} ${part}`);
   }
 
@@ -964,6 +1008,43 @@ export class Game {
         placeCarOnRoad(-120, 80, Math.PI);
         crowd(80, -120);
         await sleep(1800);
+      } else if (name === 'neon') {
+        // On foot right in front of a neon storefront facing a road,
+        // camera low and close so the sign + halo fill the frame.
+        const s = this.city.storeSpots.find((sp) => Math.abs(Math.sin(sp.angle)) < 0.5) || this.city.storeSpots[0];
+        const fx = Math.sin(s.angle), fz = Math.cos(s.angle);
+        this.player.x = s.x + fx * 8; this.player.z = s.z + fz * 8;
+        this.player.heading = Math.atan2(fz, -fx);
+        this.player.syncMesh();
+        // Camera behind the player relative to the shop: offset along the
+        // shop's facing direction, so camYaw equals the shop angle.
+        // Diagonal view (half a radian off dead-on): the sign stays in
+        // frame, the shopfront is foreshortened, and the street recedes
+        // with lamps and lit windows instead of a flat empty road.
+        // Lower pitch keeps the sign (6.4 m up) inside the frame.
+        // Hide the mission banner while staging: it is DOM top-centre
+        // and would cover the sign in the 3D view.
+        this.camYaw = s.angle + 0.5;
+        this.camPitch = 0.12;
+        this.camDist = 10;
+        const mp = document.getElementById('mission');
+        if (mp) mp.style.visibility = 'hidden';
+        // Peds on the sidewalk in front of the shop only — no traffic
+        // cars, so nothing parks between the camera and the sign.
+        const rz = Math.round(s.z / 80) * 80;
+        for (let i = 0; i < 6; i++) {
+          const ped = this.peds[i];
+          ped.x = s.x - 20 + i * 8;
+          ped.z = rz + (i % 2 ? -11 : 11);
+          ped.alive = true;
+          ped.mesh.visible = true;
+          ped.mesh.rotation.x = 0;
+          ped.heading = (Math.PI / 2) * (i % 4);
+          ped.syncMesh();
+        }
+        await sleep(1800);
+        // Banner stays hidden: stageShot is screenshot-only, and the
+        // screenshot is taken seconds after staging finishes.
       }
       this.shotReady = true;
       window.__shotReady = true;

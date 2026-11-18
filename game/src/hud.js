@@ -39,6 +39,51 @@ export function createHud(doc) {
     setTimeout(() => { d.classList.add('fade'); setTimeout(() => d.remove(), 600); }, 3600);
   };
 
+  // Dialogue card: a named speaker + portrait medallion, created on first
+  // use. Non-blocking by construction (#hud is pointer-events:none) and
+  // timed — it hides itself after 4.2 s so it can never stall the game.
+  hud.dialogueEl = null; hud.dialogueTimer = null;
+  hud.dialogue = (name, text, color = '#14d8b8') => {
+    if (!hud.dialogueEl) {
+      const d = doc.createElement('div');
+      d.style.cssText = 'position:absolute;left:16px;bottom:240px;max-width:360px;pointer-events:none;display:none;gap:10px;align-items:flex-start;background:rgba(8,10,14,0.82);border:1px solid rgba(255,255,255,0.2);border-radius:10px;padding:10px 12px;';
+      const por = doc.createElement('div');
+      por.style.cssText = 'flex:none;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#062a24;';
+      const body = doc.createElement('div');
+      const nm = doc.createElement('div');
+      nm.style.cssText = 'font-size:12px;font-weight:800;letter-spacing:1px;';
+      const ln = doc.createElement('div');
+      ln.style.cssText = 'font-size:14px;line-height:1.35;';
+      body.appendChild(nm); body.appendChild(ln);
+      d.appendChild(por); d.appendChild(body);
+      hud.toastsEl.parentElement.appendChild(d);
+      hud.dialogueEl = d; hud.dialoguePor = por; hud.dialogueName = nm; hud.dialogueLine = ln;
+    }
+    const el = hud.dialogueEl;
+    el.style.display = 'flex';
+    hud.dialoguePor.textContent = name.charAt(0);
+    hud.dialoguePor.style.background = color;
+    hud.dialogueName.textContent = name;
+    hud.dialogueName.style.color = color;
+    hud.dialogueLine.textContent = text;
+    clearTimeout(hud.dialogueTimer);
+    hud.dialogueTimer = setTimeout(() => { el.style.display = 'none'; }, 4200);
+  };
+
+  // Respect meter: one star per completed story job (0–6), shown under the
+  // money readout. Presentation only — it reads M.completed, never drives it.
+  hud.respectEl = null;
+  hud.setRespect = (n) => {
+    if (!hud.respectEl) {
+      const d = doc.createElement('div');
+      d.style.cssText = 'font-size:12px;font-weight:700;letter-spacing:2px;color:#ffc46a;margin-top:2px;';
+      hud.moneyEl.parentElement.appendChild(d);
+      hud.respectEl = d;
+    }
+    const done = Math.max(0, Math.min(6, n));
+    hud.respectEl.textContent = 'RESPECT ' + '★'.repeat(done) + '☆'.repeat(6 - done) + ' ' + done + '/6';
+  };
+
   hud.setHealth = (hp) => {
     const pct = Math.max(0, Math.min(100, hp));
     hud.hpFill.style.width = pct + '%';
@@ -155,6 +200,38 @@ export function createHud(doc) {
     c.moveTo(0, -7); c.lineTo(5, 6); c.lineTo(0, 3); c.lineTo(-5, 6); c.closePath();
     c.fill(); c.stroke();
     c.restore();
+    // Police response panel: count + distance-derived status. Our police
+    // only patrol/chase/ram, so the status comes from the nearest unit's
+    // distance to the player, not from a state machine.
+    const cops = state.police || [];
+    let copStatus = 'CLEAR', copDist = null;
+    if (cops.length) {
+      let dmin = 1e9;
+      for (const pc of cops) {
+        const d = Math.hypot(pc.x - state.player.x, pc.z - state.player.z);
+        if (d < dmin) dmin = d;
+      }
+      copDist = Math.round(dmin);
+      copStatus = dmin < 40 ? 'CHASING' : dmin < 120 ? 'CLOSING' : 'PATROLLING';
+    }
+    const copText = `POLICE ${cops.length} · ${copStatus}` + (copDist == null ? '' : ` · ${copDist}m`);
+    const copColor = copStatus === 'CHASING' ? '#ff4a3d' : copStatus === 'CLOSING' ? '#ffb020' : copStatus === 'PATROLLING' ? '#9fd8ff' : '#4fc46a';
+    c.font = 'bold 11px sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    const copW = c.measureText(copText).width + 12;
+    c.fillStyle = 'rgba(8,10,14,0.6)';
+    c.fillRect(cx - copW / 2, 26, copW, 16);
+    c.fillStyle = copColor;
+    c.fillText(copText, cx, 34);
+    // District label: coarse quadrant from the player position.
+    const qx = state.player.x, qz = state.player.z;
+    let district = 'DOWNTOWN';
+    if (Math.abs(qx) >= 80 || Math.abs(qz) >= 80) {
+      district = qz < 0 ? (qx < 0 ? 'NORTH HARBOUR' : 'MARINA HEIGHTS') : (qx < 0 ? 'OLD PIER' : 'DOCKSIDE');
+    }
+    c.font = 'bold 11px sans-serif';
+    c.fillStyle = 'rgba(255,255,255,0.85)';
+    c.fillText(district, cx, S - 16);
     c.restore();
     // Ring border.
     c.strokeStyle = '#0a0c0e';
